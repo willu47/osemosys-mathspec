@@ -23,12 +23,18 @@ from osemosys_mathspec.engine.evaluate import ModelData
 
 LOGGER = logging.getLogger(__name__)
 
-#: The formulation, shipped with the package.
-SPEC_PATH = Path(str(resources.files('osemosys_mathspec') / 'osemosys.yaml'))
+#: The formulation, shipped with the package as one fragment per block.
+SPEC_PATH = Path(str(resources.files('osemosys_mathspec') / 'spec'))
 
 
 def load_spec(path: str | Path = SPEC_PATH) -> mathspec.Spec:
-    return mathspec.to_spec(path)
+    """A mathspec file, or a folder of fragments merged in file order under the first fragment's description."""
+    if not Path(path).is_dir():
+        return mathspec.to_spec(path)
+    fragments = sorted(Path(path).glob('*.yaml'))
+    if not fragments:
+        raise ValueError(f'no *.yaml fragments in {path}')
+    return mathspec.merge(fragments, description=mathspec.to_spec(fragments[0]).description)
 
 
 @dataclass
@@ -64,7 +70,7 @@ def run(
         to_format: Any format ``otoole.write`` takes; results are written only with ``to_path``.
         to_path: Where the results go.
         solver: Any solver linopy drives.
-        spec: The formulation; the packaged ``osemosys.yaml`` when omitted.
+        spec: The formulation; the packaged fragments in ``spec/``, merged, when omitted.
         solver_options: Passed to the solver through linopy.
     """
     spec = spec or load_spec()

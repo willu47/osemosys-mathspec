@@ -1,0 +1,77 @@
+description: the renewable target, the least share of the tagged fuels' production renewables make
+
+dimensions:
+  REGION: {}
+  TECHNOLOGY: {}
+  TIMESLICE: {}
+  FUEL: {}
+  YEAR:
+    dtype: int
+
+given:
+  parameters:
+    YearSplit: { dims: [TIMESLICE, YEAR] }
+  variables:
+    ProductionByTechnology: { dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR] }
+    RateOfProduction: { dims: [REGION, TIMESLICE, FUEL, YEAR] }
+    RateOfUseByTechnology: { dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR] }
+
+parameters:
+  # ------------------------------------------------ RE generation target
+  RETagTechnology:
+    description: one where the technology is renewable, zero elsewhere
+    dims: [REGION, TECHNOLOGY, YEAR]
+  RETagFuel:
+    description: one where the fuel counts towards the renewable target, zero elsewhere
+    dims: [REGION, FUEL, YEAR]
+  REMinProductionTarget:
+    description: the least share of target-fuel production that has to be renewable
+    dims: [REGION, YEAR]
+
+variables:
+  # ------------------------------------------------------ Activity variables
+  ProductionByTechnologyAnnual:
+    description: the fuel a technology produces over the year
+    dims: [REGION, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+  UseByTechnologyAnnual:
+    description: the fuel a technology uses over the year
+    dims: [REGION, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+
+  # --------------------------------------------------------- RE gen target
+  TotalREProductionAnnual:
+    description: the fuel renewable technologies produce over the year
+    dims: [REGION, YEAR]
+  RETotalProductionOfTargetFuelAnnual:
+    description: the production of the fuels the renewable target counts, over the year
+    dims: [REGION, YEAR]
+
+constraints:
+  # --------------------------------------------------- RE production target
+  RE1_FuelProductionByTechnologyAnnual:
+    dims: [REGION, TECHNOLOGY, FUEL, YEAR]
+    expression: sum(ProductionByTechnology, over=TIMESLICE) == ProductionByTechnologyAnnual
+  RE2_TechIncluded:
+    dims: [REGION, YEAR]
+    expression: >-
+      sum(sum(ProductionByTechnologyAnnual * RETagTechnology, over=TECHNOLOGY), over=FUEL)
+      == TotalREProductionAnnual
+  RE3_FuelIncluded:
+    dims: [REGION, YEAR]
+    expression: >-
+      sum(sum(RateOfProduction * YearSplit * RETagFuel, over=TIMESLICE), over=FUEL)
+      == RETotalProductionOfTargetFuelAnnual
+  RE4_EnergyConstraint:
+    dims: [REGION, YEAR]
+    expression: REMinProductionTarget * RETotalProductionOfTargetFuelAnnual <= TotalREProductionAnnual
+  RE5_FuelUseByTechnologyAnnual:
+    dims: [REGION, TECHNOLOGY, FUEL, YEAR]
+    expression: sum(RateOfUseByTechnology * YearSplit, over=TIMESLICE) == UseByTechnologyAnnual
+
+assumptions:
+  # What this translation reads into the data.
+  re_tag_technology_is_binary:
+    holds: "RETagTechnology == 0 OR RETagTechnology == 1"
+  re_tag_fuel_is_binary:
+    holds: "RETagFuel == 0 OR RETagFuel == 1"

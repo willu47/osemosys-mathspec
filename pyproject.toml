@@ -1,7 +1,7 @@
 [project]
 name = "osemosys-mathspec"
 version = "0.1.0"
-description = "OSeMOSYS with its formulation in a mathspec file, built with linopy and fed by otoole"
+description = "OSeMOSYS with its formulation in mathspec fragments, built with linopy and fed by otoole"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

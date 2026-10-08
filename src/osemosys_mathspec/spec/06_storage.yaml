@@ -1,0 +1,423 @@
+description: storage, its charge and discharge, its level at each chronological boundary, and its investment
+
+dimensions:
+  REGION: {}
+  TECHNOLOGY: {}
+  TIMESLICE: {}
+  MODE_OF_OPERATION: {}
+  YEAR:
+    dtype: int
+  SEASON:
+    description: seasons, consecutive integers in their chronological order
+    dtype: int
+  DAYTYPE:
+    description: day types, consecutive integers in their chronological order
+    dtype: int
+  DAILYTIMEBRACKET:
+    description: the brackets a day is divided into, integers in their chronological order
+    dtype: int
+  STORAGE:
+    description: storage facilities
+
+given:
+  parameters:
+    YearSplit: { dims: [TIMESLICE, YEAR] }
+    YearsSinceStart: { dims: [YEAR] }
+    YearsUntilEnd: { dims: [YEAR] }
+    DepreciationMethod: { dims: [REGION], dtype: int }
+  variables:
+    RateOfActivity: { dims: [REGION, TIMESLICE, TECHNOLOGY, MODE_OF_OPERATION, YEAR] }
+  expressions:
+    DiscountedCostByRegion: { dims: [REGION, YEAR] }
+
+parameters:
+  # ----------------------------------------------------------------- Global
+  DiscountRateStorage:
+    description: the discount rate of a storage facility
+    dims: [REGION, STORAGE]
+  DaySplit:
+    description: the fraction of a year one daily time bracket stands for
+    dims: [DAILYTIMEBRACKET, YEAR]
+  Conversionls:
+    description: one where the time slice falls in the season, zero elsewhere
+    dims: [TIMESLICE, SEASON]
+  Conversionld:
+    description: one where the time slice falls on the day type, zero elsewhere
+    dims: [TIMESLICE, DAYTYPE]
+  Conversionlh:
+    description: one where the time slice falls in the daily time bracket, zero elsewhere
+    dims: [TIMESLICE, DAILYTIMEBRACKET]
+  DaysInDayType:
+    description: how many days of the day type one week of the season holds
+    dims: [SEASON, DAYTYPE, YEAR]
+  DailyTimeBracketCount:
+    description: >-
+      how many daily time brackets there are, data prep — the width of a
+      window that reaches back to the first bracket of the day from any other
+    dims: []
+    dtype: int
+
+  # ---------------------------------------------------------------- Storage
+  TechnologyToStorage:
+    description: the share of a technology's activity in a mode that charges the storage
+    dims: [REGION, TECHNOLOGY, STORAGE, MODE_OF_OPERATION]
+  TechnologyFromStorage:
+    description: the share of a technology's activity in a mode that discharges the storage
+    dims: [REGION, TECHNOLOGY, STORAGE, MODE_OF_OPERATION]
+  StorageLevelStart:
+    description: the storage level at the start of the first year
+    dims: [REGION, STORAGE]
+  StorageMaxChargeRate:
+    description: the highest rate the storage charges at
+    dims: [REGION, STORAGE]
+  StorageMaxDischargeRate:
+    description: the highest rate the storage discharges at
+    dims: [REGION, STORAGE]
+  MinStorageCharge:
+    description: the lowest storage level, as a share of the storage's capacity
+    dims: [REGION, STORAGE, YEAR]
+  OperationalLifeStorage:
+    description: the years new storage capacity stays in service
+    dims: [REGION, STORAGE]
+    dtype: int
+  CapitalCostStorage:
+    description: the cost of one unit of new storage capacity
+    dims: [REGION, STORAGE, YEAR]
+  ResidualStorageCapacity:
+    description: storage capacity already installed before the model period
+    dims: [REGION, STORAGE, YEAR]
+
+variables:
+  # ---------------------------------------------------------------- Storage
+  RateOfStorageCharge:
+    description: the rate the storage charges at in a daily time bracket
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+  RateOfStorageDischarge:
+    description: the rate the storage discharges at in a daily time bracket
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+  NetChargeWithinYear:
+    description: the net charge into the storage in a daily time bracket, over the year
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+  NetChargeWithinDay:
+    description: the net charge into the storage in a daily time bracket, over one day
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+  StorageLevelYearStart:
+    description: the storage level at the start of the year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  StorageLevelYearFinish:
+    description: the storage level at the end of the year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  StorageLevelSeasonStart:
+    description: the storage level at the start of the season
+    dims: [REGION, STORAGE, SEASON, YEAR]
+    bounds: { lower: 0 }
+  StorageLevelDayTypeStart:
+    description: the storage level at the start of the first day of the day type
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    bounds: { lower: 0 }
+  StorageLevelDayTypeFinish:
+    description: the storage level at the end of the last day of the day type
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    bounds: { lower: 0 }
+  StorageLowerLimit:
+    description: the lowest level the storage may hold
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  StorageUpperLimit:
+    description: the highest level the storage may hold, its capacity
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  AccumulatedNewStorageCapacity:
+    description: new storage capacity built in the model period and still in service
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  NewStorageCapacity:
+    description: storage capacity built in the year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  CapitalInvestmentStorage:
+    description: the undiscounted cost of the storage capacity built in the year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  DiscountedCapitalInvestmentStorage:
+    description: the cost of the storage capacity built in the year, discounted to the first year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  SalvageValueStorage:
+    description: what the storage capacity built in the year is still worth at the end of the model period
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  DiscountedSalvageValueStorage:
+    description: the salvage value of the storage, discounted to the first year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  TotalDiscountedStorageCost:
+    description: the discounted cost of the storage, less its discounted salvage value
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+
+expressions:
+  DiscountFactorStorage:
+    description: what one unit of storage cost at the start of the year is worth in the first year
+    dims: [REGION, STORAGE, YEAR]
+    expression: (1 + DiscountRateStorage) ** YearsSinceStart
+  DiscountFactorMidStorage:
+    description: >-
+      what one unit of storage cost in the middle of the year is worth in the
+      first year; declared by OSeMOSYS and read by none of its constraints
+    dims: [REGION, STORAGE, YEAR]
+    expression: (1 + DiscountRateStorage) ** (YearsSinceStart + 0.5)
+  DiscountedCostOfStorage:
+    description: the discounted cost of every storage facility in the region in the year
+    dims: [REGION, YEAR]
+    expression: sum(TotalDiscountedStorageCost, over=STORAGE)
+    adds_to: DiscountedCostByRegion
+
+  # The storage level carried into each chronological boundary. OSeMOSYS writes
+  # each as an `if ... then ... else` inside one constraint; here each is one
+  # named quantity with a case per branch.
+  StorageLevelYearStartCarried:
+    description: the storage level a year starts with — the initial level, or where the previous year ended
+    dims: [REGION, STORAGE, YEAR]
+    cases:
+      first_year:
+        when: "position(YEAR) == 0"
+        expression: StorageLevelStart
+    otherwise: shift(StorageLevelYearStart + every_storage_period(NetChargeWithinYear), along=YEAR, offset=1)
+  StorageLevelYearFinishCarried:
+    description: the storage level a year ends with — where the next year starts, or the last year's own balance
+    dims: [REGION, STORAGE, YEAR]
+    cases:
+      last_year:
+        when: "position(YEAR) == -1"
+        expression: >-
+          StorageLevelYearStart
+          + every_storage_period(NetChargeWithinYear)
+    otherwise: shift(StorageLevelYearStart, along=YEAR, offset=-1)
+  StorageLevelSeasonStartCarried:
+    description: the storage level a season starts with — where the year starts, or where the previous season ended
+    dims: [REGION, STORAGE, SEASON, YEAR]
+    cases:
+      first_season:
+        when: "position(SEASON) == 0"
+        expression: StorageLevelYearStart
+    otherwise: >-
+      shift(StorageLevelSeasonStart
+      + sum(sum(NetChargeWithinYear, over=DAYTYPE), over=DAILYTIMEBRACKET),
+      along=SEASON, offset=1)
+  StorageLevelDayTypeStartCarried:
+    description: the storage level a day type starts with — where the season starts, or where the previous day type ended
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    cases:
+      first_daytype:
+        when: "position(DAYTYPE) == 0"
+        expression: StorageLevelSeasonStart
+    otherwise: >-
+      shift(StorageLevelDayTypeStart
+      + sum(NetChargeWithinDay * DaysInDayType, over=DAILYTIMEBRACKET),
+      along=DAYTYPE, offset=1)
+  StorageLevelDayTypeFinishCarried:
+    description: >-
+      the storage level a day type ends with — where the year ends after the
+      last day type of the last season, where the next season starts after the
+      last day type of any other, and otherwise the next day type's finish less
+      what that day type charges
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    cases:
+      last_daytype_of_last_season:
+        when: "position(SEASON) == -1 AND position(DAYTYPE) == -1"
+        expression: StorageLevelYearFinish
+      last_daytype_of_season:
+        when: "position(SEASON) != -1 AND position(DAYTYPE) == -1"
+        expression: shift(StorageLevelSeasonStart, along=SEASON, offset=-1)
+    otherwise: >-
+      shift(StorageLevelDayTypeFinish
+      - sum(NetChargeWithinDay * DaysInDayType, over=DAILYTIMEBRACKET),
+      along=DAYTYPE, offset=-1)
+
+macros:
+  brackets_before:
+    description: >-
+      the sum over the daily time brackets strictly before this one —
+      MathProg's `sum{lhlh in DAILYTIMEBRACKET: lh-lhlh>0}`
+    args: [x]
+    template: sum_back(x, along=DAILYTIMEBRACKET, window=DailyTimeBracketCount) - x
+  brackets_after:
+    description: >-
+      the sum over the daily time brackets strictly after this one —
+      MathProg's `sum{lhlh in DAILYTIMEBRACKET: lh-lhlh<0}`
+    args: [x]
+    template: sum(x, over=DAILYTIMEBRACKET) - sum_back(x, along=DAILYTIMEBRACKET, window=DailyTimeBracketCount)
+  every_storage_period:
+    description: a sum over every season, day type and daily time bracket
+    args: [x]
+    template: sum(sum(sum(x, over=SEASON), over=DAYTYPE), over=DAILYTIMEBRACKET)
+
+constraints:
+  # ------------------------------------------------------ Storage equations
+  S1_RateOfStorageCharge:
+    description: >-
+      MathProg sums only where TechnologyToStorage > 0; a zero share adds
+      nothing, and the assumptions hold the shares non-negative
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: >-
+      sum(sum(sum(RateOfActivity * TechnologyToStorage * Conversionls * Conversionld * Conversionlh,
+      over=TECHNOLOGY), over=MODE_OF_OPERATION), over=TIMESLICE)
+      == RateOfStorageCharge
+  S2_RateOfStorageDischarge:
+    description: >-
+      MathProg sums only where TechnologyFromStorage > 0; a zero share adds
+      nothing, and the assumptions hold the shares non-negative
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: >-
+      sum(sum(sum(RateOfActivity * TechnologyFromStorage * Conversionls * Conversionld * Conversionlh,
+      over=TECHNOLOGY), over=MODE_OF_OPERATION), over=TIMESLICE)
+      == RateOfStorageDischarge
+  S3_NetChargeWithinYear:
+    description: >-
+      MathProg sums only the time slices every conversion maps to the bracket;
+      any other slice carries a zero conversion and adds nothing
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: >-
+      sum((RateOfStorageCharge - RateOfStorageDischarge) * YearSplit
+      * Conversionls * Conversionld * Conversionlh, over=TIMESLICE)
+      == NetChargeWithinYear
+  S4_NetChargeWithinDay:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: (RateOfStorageCharge - RateOfStorageDischarge) * DaySplit == NetChargeWithinDay
+  S5_and_S6_StorageLevelYearStart:
+    dims: [REGION, STORAGE, YEAR]
+    expression: StorageLevelYearStartCarried == StorageLevelYearStart
+  S7_and_S8_StorageLevelYearFinish:
+    dims: [REGION, STORAGE, YEAR]
+    expression: StorageLevelYearFinishCarried == StorageLevelYearFinish
+  S9_and_S10_StorageLevelSeasonStart:
+    dims: [REGION, STORAGE, SEASON, YEAR]
+    expression: StorageLevelSeasonStartCarried == StorageLevelSeasonStart
+  S11_and_S12_StorageLevelDayTypeStart:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    expression: StorageLevelDayTypeStartCarried == StorageLevelDayTypeStart
+  S13_and_S14_and_S15_StorageLevelDayTypeFinish:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    expression: StorageLevelDayTypeFinishCarried == StorageLevelDayTypeFinish
+
+  # ---------------------------------------------------- Storage constraints
+  SC1_LowerLimit_BeginningOfDailyTimeBracketOfFirstInstanceOfDayTypeInFirstWeekConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: 0 <= StorageLevelDayTypeStart + brackets_before(NetChargeWithinDay) - StorageLowerLimit
+  SC1_UpperLimit_BeginningOfDailyTimeBracketOfFirstInstanceOfDayTypeInFirstWeekConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: StorageLevelDayTypeStart + brackets_before(NetChargeWithinDay) - StorageUpperLimit <= 0
+  SC2_LowerLimit_EndOfDailyTimeBracketOfLastInstanceOfDayTypeInFirstWeekConstraint:
+    description: MathProg's `if ld > min(DAYTYPE) then ...` leaves `0 <= 0` at the first day type, so no row stands there
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    where: "position(DAYTYPE) > 0"
+    expression: >-
+      0 <= StorageLevelDayTypeStart
+      - shift(brackets_after(NetChargeWithinDay), along=DAYTYPE, offset=1)
+      - StorageLowerLimit
+  SC2_UpperLimit_EndOfDailyTimeBracketOfLastInstanceOfDayTypeInFirstWeekConstraint:
+    description: MathProg's `if ld > min(DAYTYPE) then ...` leaves `0 <= 0` at the first day type, so no row stands there
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    where: "position(DAYTYPE) > 0"
+    expression: >-
+      StorageLevelDayTypeStart
+      - shift(brackets_after(NetChargeWithinDay), along=DAYTYPE, offset=1)
+      - StorageUpperLimit <= 0
+  SC3_LowerLimit_EndOfDailyTimeBracketOfLastInstanceOfDayTypeInLastWeekConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: 0 <= StorageLevelDayTypeFinish - brackets_after(NetChargeWithinDay) - StorageLowerLimit
+  SC3_UpperLimit_EndOfDailyTimeBracketOfLastInstanceOfDayTypeInLastWeekConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: StorageLevelDayTypeFinish - brackets_after(NetChargeWithinDay) - StorageUpperLimit <= 0
+  SC4_LowerLimit_BeginningOfDailyTimeBracketOfFirstInstanceOfDayTypeInLastWeekConstraint:
+    description: MathProg's `if ld > min(DAYTYPE) then ...` leaves `0 <= 0` at the first day type, so no row stands there
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    where: "position(DAYTYPE) > 0"
+    expression: >-
+      0 <= shift(StorageLevelDayTypeFinish, along=DAYTYPE, offset=1)
+      + brackets_before(NetChargeWithinDay)
+      - StorageLowerLimit
+  SC4_UpperLimit_BeginningOfDailyTimeBracketOfFirstInstanceOfDayTypeInLastWeekConstraint:
+    description: MathProg's `if ld > min(DAYTYPE) then ...` leaves `0 <= 0` at the first day type, so no row stands there
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    where: "position(DAYTYPE) > 0"
+    expression: >-
+      shift(StorageLevelDayTypeFinish, along=DAYTYPE, offset=1)
+      + brackets_before(NetChargeWithinDay)
+      - StorageUpperLimit <= 0
+  SC5_MaxChargeConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: RateOfStorageCharge <= StorageMaxChargeRate
+  SC6_MaxDischargeConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: RateOfStorageDischarge <= StorageMaxDischargeRate
+
+  # ---------------------------------------------------- Storage investments
+  SI1_StorageUpperLimit:
+    dims: [REGION, STORAGE, YEAR]
+    expression: AccumulatedNewStorageCapacity + ResidualStorageCapacity == StorageUpperLimit
+  SI2_StorageLowerLimit:
+    dims: [REGION, STORAGE, YEAR]
+    expression: MinStorageCharge * StorageUpperLimit == StorageLowerLimit
+  SI3_TotalNewStorage:
+    description: new storage capacity stays in service for its operational life
+    dims: [REGION, STORAGE, YEAR]
+    expression: sum_back(NewStorageCapacity, along=YEAR, window=OperationalLifeStorage) == AccumulatedNewStorageCapacity
+  SI4_UndiscountedCapitalInvestmentStorage:
+    dims: [REGION, STORAGE, YEAR]
+    expression: CapitalCostStorage * NewStorageCapacity == CapitalInvestmentStorage
+  SI5_DiscountingCapitalInvestmentStorage:
+    dims: [REGION, STORAGE, YEAR]
+    expression: CapitalInvestmentStorage / DiscountFactorStorage == DiscountedCapitalInvestmentStorage
+  SI6_SalvageValueStorageAtEndOfPeriod1:
+    description: storage that reaches the end of its life within the model period is worth nothing at its end
+    dims: [REGION, STORAGE, YEAR]
+    where: "OperationalLifeStorage <= YearsUntilEnd"
+    expression: 0 == SalvageValueStorage
+  SI7_SalvageValueStorageAtEndOfPeriod2:
+    description: straight-line depreciation, or sinking-fund depreciation at a zero discount rate
+    dims: [REGION, STORAGE, YEAR]
+    where: >-
+      (DepreciationMethod == 1 AND OperationalLifeStorage > YearsUntilEnd AND DiscountRateStorage == 0)
+      OR (DepreciationMethod == 2 AND OperationalLifeStorage > YearsUntilEnd)
+    expression: CapitalInvestmentStorage * (1 - YearsUntilEnd / OperationalLifeStorage) == SalvageValueStorage
+  SI8_SalvageValueStorageAtEndOfPeriod3:
+    description: sinking-fund depreciation at a positive discount rate
+    dims: [REGION, STORAGE, YEAR]
+    where: "DepreciationMethod == 1 AND OperationalLifeStorage > YearsUntilEnd AND DiscountRateStorage > 0"
+    expression: >-
+      CapitalInvestmentStorage * (1 - ((1 + DiscountRateStorage) ** YearsUntilEnd - 1)
+      / ((1 + DiscountRateStorage) ** OperationalLifeStorage - 1))
+      == SalvageValueStorage
+  SI9_SalvageValueStorageDiscountedToStartYear:
+    dims: [REGION, STORAGE, YEAR]
+    description: >-
+      the salvage value discounted over the whole model period;
+      `YearsSinceStart + YearsUntilEnd` is `max(YEAR) - min(YEAR) + 1`
+    expression: >-
+      SalvageValueStorage / (1 + DiscountRateStorage) ** (YearsSinceStart + YearsUntilEnd)
+      == DiscountedSalvageValueStorage
+  SI10_TotalDiscountedCostByStorage:
+    dims: [REGION, STORAGE, YEAR]
+    expression: DiscountedCapitalInvestmentStorage - DiscountedSalvageValueStorage == TotalDiscountedStorageCost
+
+assumptions:
+  # What this translation reads into the data.
+  operational_life_storage_is_not_negative:
+    description: >-
+      a window of new storage capacity in service spans OperationalLifeStorage
+      years; a life of 0 is an empty window, as in MathProg, where no capacity
+      accumulates
+    holds: "OperationalLifeStorage >= 0"
+  storage_shares_are_non_negative:
+    description: S1 and S2 sum every share, where MathProg sums only the positive ones
+    holds: "TechnologyToStorage >= 0 AND TechnologyFromStorage >= 0"
+  conversion_ls_is_binary:
+    holds: "Conversionls == 0 OR Conversionls == 1"
+  conversion_ld_is_binary:
+    holds: "Conversionld == 0 OR Conversionld == 1"
+  conversion_lh_is_binary:
+    holds: "Conversionlh == 0 OR Conversionlh == 1"

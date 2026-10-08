@@ -21,7 +21,7 @@ def check_consecutive(coords: dict[str, pd.Index]) -> None:
     MathProg's ``y-1`` reads the year before by value, and the spec's ``shift``
     reads it by position. The two agree only when the labels are consecutive.
     """
-    for dim in CONSECUTIVE:
+    for dim in (dim for dim in CONSECUTIVE if dim in coords):
         labels = coords[dim].to_numpy()
         if len(labels) > 1 and not np.all(np.diff(labels) == 1):
             raise ValueError(

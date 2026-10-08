@@ -21,7 +21,11 @@ def parser() -> argparse.ArgumentParser:
     solve.add_argument('--to-format', choices=('csv', 'excel'), default='csv', help='format of the results')
     solve.add_argument('--to-path', help='where to write the results; nothing is written without it')
     solve.add_argument('--solver', default='highs', help='any solver linopy drives (default: highs)')
-    solve.add_argument('--spec', default=str(SPEC_PATH), help='the mathspec formulation (default: the packaged one)')
+    solve.add_argument(
+        '--spec',
+        default=str(SPEC_PATH),
+        help='a mathspec file, or a folder of fragments to merge (default: the packaged one)',
+    )
     return front
 
 

@@ -1,0 +1,32 @@
+description: the specified annual demand for each fuel, as a rate in every time slice
+
+dimensions:
+  REGION: {}
+  TIMESLICE: {}
+  FUEL: {}
+  YEAR:
+    dtype: int
+
+given:
+  parameters:
+    YearSplit: { dims: [TIMESLICE, YEAR] }
+    SpecifiedAnnualDemand: { dims: [REGION, FUEL, YEAR] }
+
+parameters:
+  # ---------------------------------------------------------------- Demands
+  SpecifiedDemandProfile:
+    description: the share of the annual specified demand falling in each time slice
+    dims: [REGION, FUEL, TIMESLICE, YEAR]
+
+variables:
+  # ---------------------------------------------------------------- Demands
+  RateOfDemand:
+    description: the rate a fuel is demanded at in a time slice
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+
+constraints:
+  EQ_SpecifiedDemand:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "SpecifiedAnnualDemand != 0"
+    expression: SpecifiedAnnualDemand * SpecifiedDemandProfile / YearSplit == RateOfDemand
