@@ -1,0 +1,55 @@
+description: each technology's production, use and activity, and each region's cost over the model period
+
+dimensions:
+  REGION: {}
+  TECHNOLOGY: {}
+  TIMESLICE: {}
+  FUEL: {}
+  MODE_OF_OPERATION: {}
+  YEAR:
+    dtype: int
+
+given:
+  parameters:
+    YearSplit: { dims: [TIMESLICE, YEAR] }
+  variables:
+    RateOfActivity: { dims: [REGION, TIMESLICE, TECHNOLOGY, MODE_OF_OPERATION, YEAR] }
+    RateOfProductionByTechnology: { dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR] }
+    RateOfUseByTechnology: { dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR] }
+    TotalDiscountedCost: { dims: [REGION, YEAR] }
+
+variables:
+  # ------------------------------------------------------ Activity variables
+  TotalAnnualTechnologyActivityByMode:
+    description: a technology's activity in a mode over the year
+    dims: [REGION, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+    bounds: { lower: 0 }
+  ProductionByTechnology:
+    description: the fuel a technology produces in a time slice
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+  UseByTechnology:
+    description: the fuel a technology uses in a time slice
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+
+  # ------------------------------------------------------- Costing variables
+  ModelPeriodCostByRegion:
+    description: every discounted cost of the region over the model period
+    dims: [REGION]
+    bounds: { lower: 0 }
+
+constraints:
+  # --------------------------------- Accounting technology production/use
+  Acc1_FuelProductionByTechnology:
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    expression: RateOfProductionByTechnology * YearSplit == ProductionByTechnology
+  Acc2_FuelUseByTechnology:
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    expression: RateOfUseByTechnology * YearSplit == UseByTechnology
+  Acc3_AverageAnnualRateOfActivity:
+    dims: [REGION, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+    expression: sum(RateOfActivity * YearSplit, over=TIMESLICE) == TotalAnnualTechnologyActivityByMode
+  Acc4_ModelPeriodCostByRegion:
+    dims: [REGION]
+    expression: sum(TotalDiscountedCost, over=YEAR) == ModelPeriodCostByRegion

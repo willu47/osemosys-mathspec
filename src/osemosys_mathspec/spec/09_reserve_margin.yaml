@@ -1,0 +1,66 @@
+description: the reserve margin, the capacity that stands behind the production of the tagged fuels
+
+dimensions:
+  REGION: {}
+  TECHNOLOGY: {}
+  TIMESLICE: {}
+  FUEL: {}
+  YEAR:
+    dtype: int
+
+given:
+  parameters:
+    CapacityToActivityUnit: { dims: [REGION, TECHNOLOGY] }
+  variables:
+    TotalCapacityAnnual: { dims: [REGION, TECHNOLOGY, YEAR] }
+    RateOfProduction: { dims: [REGION, TIMESLICE, FUEL, YEAR] }
+
+parameters:
+  # --------------------------------------------------------- Reserve margin
+  ReserveMarginTagTechnology:
+    description: the share of a technology's capacity that counts towards the reserve margin
+    dims: [REGION, TECHNOLOGY, YEAR]
+  ReserveMarginTagFuel:
+    description: one where production of the fuel needs a reserve margin, zero elsewhere
+    dims: [REGION, FUEL, YEAR]
+  ReserveMargin:
+    description: the capacity that has to stand behind peak production, as a multiple of it
+    dims: [REGION, YEAR]
+
+variables:
+  # --------------------------------------------------------- Reserve margin
+  TotalCapacityInReserveMargin:
+    description: the capacity that counts towards the reserve margin, in activity units
+    dims: [REGION, YEAR]
+    bounds: { lower: 0 }
+  DemandNeedingReserveMargin:
+    description: the rate of production that needs a reserve margin, in a time slice
+    dims: [REGION, TIMESLICE, YEAR]
+    bounds: { lower: 0 }
+
+constraints:
+  # ------------------------------------------------ Reserve margin constraint
+  RM1_ReserveMargin_TechnologiesIncluded_In_Activity_Units:
+    description: >-
+      MathProg indexes this over TIMESLICE too, and no term reads it, so each
+      row there is the same row repeated; it is stated once
+    dims: [REGION, YEAR]
+    where: "ReserveMargin > 0"
+    expression: >-
+      sum(TotalCapacityAnnual * ReserveMarginTagTechnology * CapacityToActivityUnit, over=TECHNOLOGY)
+      == TotalCapacityInReserveMargin
+  RM2_ReserveMargin_FuelsIncluded:
+    dims: [REGION, TIMESLICE, YEAR]
+    where: "ReserveMargin > 0"
+    expression: sum(RateOfProduction * ReserveMarginTagFuel, over=FUEL) == DemandNeedingReserveMargin
+  RM3_ReserveMargin_Constraint:
+    dims: [REGION, TIMESLICE, YEAR]
+    where: "ReserveMargin > 0"
+    expression: DemandNeedingReserveMargin * ReserveMargin <= TotalCapacityInReserveMargin
+
+assumptions:
+  # What this translation reads into the data.
+  reserve_margin_tag_technology_is_a_share:
+    holds: "ReserveMarginTagTechnology >= 0 AND ReserveMarginTagTechnology <= 1"
+  reserve_margin_tag_fuel_is_binary:
+    holds: "ReserveMarginTagFuel == 0 OR ReserveMarginTagFuel == 1"

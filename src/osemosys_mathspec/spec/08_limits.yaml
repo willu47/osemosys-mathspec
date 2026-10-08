@@ -1,0 +1,146 @@
+description: limits on a technology's capacity, new capacity and activity, in a year and over the model period
+
+dimensions:
+  REGION: {}
+  TECHNOLOGY: {}
+  TIMESLICE: {}
+  YEAR:
+    dtype: int
+
+given:
+  parameters:
+    YearSplit: { dims: [TIMESLICE, YEAR] }
+    CapacityToActivityUnit: { dims: [REGION, TECHNOLOGY] }
+    CapacityFactor: { dims: [REGION, TECHNOLOGY, TIMESLICE, YEAR] }
+    AvailabilityFactor: { dims: [REGION, TECHNOLOGY, YEAR] }
+    ResidualCapacity: { dims: [REGION, TECHNOLOGY, YEAR] }
+  variables:
+    NewCapacity: { dims: [REGION, TECHNOLOGY, YEAR] }
+    TotalCapacityAnnual: { dims: [REGION, TECHNOLOGY, YEAR] }
+    RateOfTotalActivity: { dims: [REGION, TECHNOLOGY, TIMESLICE, YEAR] }
+
+parameters:
+  # --------------------------------------------------- Capacity constraints
+  TotalAnnualMaxCapacity:
+    description: the most capacity a technology may have in a year; -1 for no limit
+    dims: [REGION, TECHNOLOGY, YEAR]
+  TotalAnnualMinCapacity:
+    description: the least capacity a technology must have in a year
+    dims: [REGION, TECHNOLOGY, YEAR]
+
+  # ------------------------------------------------- Investment constraints
+  TotalAnnualMaxCapacityInvestment:
+    description: the most new capacity a technology may gain in a year; -1 for no limit
+    dims: [REGION, TECHNOLOGY, YEAR]
+  TotalAnnualMinCapacityInvestment:
+    description: the least new capacity a technology must gain in a year
+    dims: [REGION, TECHNOLOGY, YEAR]
+
+  # --------------------------------------------------- Activity constraints
+  TotalTechnologyAnnualActivityUpperLimit:
+    description: the most activity a technology may have in a year; -1 for no limit
+    dims: [REGION, TECHNOLOGY, YEAR]
+  TotalTechnologyAnnualActivityLowerLimit:
+    description: the least activity a technology must have in a year
+    dims: [REGION, TECHNOLOGY, YEAR]
+  TotalTechnologyModelPeriodActivityUpperLimit:
+    description: the most activity a technology may have over the model period; -1 for no limit
+    dims: [REGION, TECHNOLOGY]
+  TotalTechnologyModelPeriodActivityLowerLimit:
+    description: the least activity a technology must have over the model period
+    dims: [REGION, TECHNOLOGY]
+
+variables:
+  # ------------------------------------------------------ Activity variables
+  TotalTechnologyAnnualActivity:
+    description: a technology's activity over the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  TotalTechnologyModelPeriodActivity:
+    description: a technology's activity over the model period
+    dims: [REGION, TECHNOLOGY]
+
+constraints:
+  # ---------------------------------------------- Total capacity constraints
+  TCC1_TotalAnnualMaxCapacityConstraint:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalAnnualMaxCapacity != -1"
+    expression: TotalCapacityAnnual <= TotalAnnualMaxCapacity
+  TCC2_TotalAnnualMinCapacityConstraint:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalAnnualMinCapacity > 0"
+    expression: TotalCapacityAnnual >= TotalAnnualMinCapacity
+
+  # ------------------------------------------------ New capacity constraints
+  NCC1_TotalAnnualMaxNewCapacityConstraint:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalAnnualMaxCapacityInvestment != -1"
+    expression: NewCapacity <= TotalAnnualMaxCapacityInvestment
+  NCC2_TotalAnnualMinNewCapacityConstraint:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalAnnualMinCapacityInvestment > 0"
+    expression: NewCapacity >= TotalAnnualMinCapacityInvestment
+
+  # --------------------------------------------- Annual activity constraints
+  AAC1_TotalAnnualTechnologyActivity:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: sum(RateOfTotalActivity * YearSplit, over=TIMESLICE) == TotalTechnologyAnnualActivity
+  AAC2_TotalAnnualTechnologyActivityUpperLimit:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalTechnologyAnnualActivityUpperLimit != -1"
+    expression: TotalTechnologyAnnualActivity <= TotalTechnologyAnnualActivityUpperLimit
+  AAC3_TotalAnnualTechnologyActivityLowerLimit:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalTechnologyAnnualActivityLowerLimit > 0"
+    expression: TotalTechnologyAnnualActivity >= TotalTechnologyAnnualActivityLowerLimit
+
+  # ---------------------------------------------- Total activity constraints
+  TAC1_TotalModelHorizonTechnologyActivity:
+    dims: [REGION, TECHNOLOGY]
+    expression: sum(TotalTechnologyAnnualActivity, over=YEAR) == TotalTechnologyModelPeriodActivity
+  TAC2_TotalModelHorizonTechnologyActivityUpperLimit:
+    dims: [REGION, TECHNOLOGY]
+    where: "TotalTechnologyModelPeriodActivityUpperLimit != -1"
+    expression: TotalTechnologyModelPeriodActivity <= TotalTechnologyModelPeriodActivityUpperLimit
+  TAC3_TotalModelHorizenTechnologyActivityLowerLimit:
+    dims: [REGION, TECHNOLOGY]
+    where: "TotalTechnologyModelPeriodActivityLowerLimit > 0"
+    expression: TotalTechnologyModelPeriodActivity >= TotalTechnologyModelPeriodActivityLowerLimit
+
+assumptions:
+  # The MathProg file's `check` statements.
+  capacity_investment_bounds_do_not_cross:
+    description: "'Capacity investment' check"
+    holds: "TotalAnnualMaxCapacityInvestment >= TotalAnnualMinCapacityInvestment"
+    where: "TotalAnnualMaxCapacityInvestment != -1 AND TotalAnnualMinCapacityInvestment != 0"
+  annual_activity_limits_do_not_cross:
+    description: "'Annual Activity' check"
+    holds: "TotalTechnologyAnnualActivityUpperLimit >= TotalTechnologyAnnualActivityLowerLimit"
+    where: >-
+      TotalTechnologyAnnualActivityUpperLimit != -1
+      AND TotalTechnologyAnnualActivityUpperLimit != 0
+      AND TotalTechnologyAnnualActivityLowerLimit != 0
+  residual_capacity_within_max_capacity:
+    description: "'Capacity' check 1"
+    holds: "TotalAnnualMaxCapacity >= ResidualCapacity"
+    where: "TotalAnnualMaxCapacity != -1 AND ResidualCapacity != 0"
+  residual_and_min_investment_within_max_capacity:
+    description: "'Capacity' check 2"
+    holds: "TotalAnnualMaxCapacity >= ResidualCapacity + TotalAnnualMinCapacityInvestment"
+    where: "TotalAnnualMaxCapacity != -1 AND ResidualCapacity != 0"
+  max_capacity_can_meet_min_activity:
+    description: "'Minimum Annual activity' check"
+    holds: >-
+      sum(CapacityFactor * YearSplit, over=TIMESLICE) * TotalAnnualMaxCapacity
+      * AvailabilityFactor * CapacityToActivityUnit
+      >= TotalTechnologyAnnualActivityLowerLimit
+    where: >-
+      TotalAnnualMaxCapacity != 0 AND TotalAnnualMaxCapacity != -1
+      AND TotalTechnologyAnnualActivityLowerLimit != 0
+      AND AvailabilityFactor != 0 AND CapacityToActivityUnit != 0
+  model_period_activity_limit_covers_annual_limits:
+    description: "'Model period activity limit' check"
+    holds: >-
+      TotalTechnologyModelPeriodActivityLowerLimit
+      >= sum(TotalTechnologyAnnualActivityLowerLimit, over=YEAR)
+    where: "TotalTechnologyModelPeriodActivityLowerLimit != 0"

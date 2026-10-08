@@ -1,0 +1,90 @@
+description: capacity adequacy, the capacity in service each year and the activity it allows in a time slice
+
+dimensions:
+  REGION: {}
+  TECHNOLOGY: {}
+  TIMESLICE: {}
+  MODE_OF_OPERATION:
+    description: the modes a technology runs in, each with its own input and output ratios
+  YEAR:
+    dtype: int
+
+given:
+  parameters:
+    YearSplit: { dims: [TIMESLICE, YEAR] }
+    OperationalLife: { dims: [REGION, TECHNOLOGY], dtype: int }
+    CapacityToActivityUnit: { dims: [REGION, TECHNOLOGY] }
+    CapacityFactor: { dims: [REGION, TECHNOLOGY, TIMESLICE, YEAR] }
+    AvailabilityFactor: { dims: [REGION, TECHNOLOGY, YEAR] }
+    ResidualCapacity: { dims: [REGION, TECHNOLOGY, YEAR] }
+
+parameters:
+  # --------------------------------------------------- Capacity constraints
+  CapacityOfOneTechnologyUnit:
+    description: the size of one unit where capacity is built in whole units; zero where it is continuous
+    dims: [REGION, TECHNOLOGY, YEAR]
+
+variables:
+  # ------------------------------------------------------ Capacity variables
+  NumberOfNewTechnologyUnits:
+    description: >-
+      how many whole units are built in the year; it exists only where
+      capacity comes in units, since nothing reads it anywhere else
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "CapacityOfOneTechnologyUnit != 0"
+    bounds: { lower: 0 }
+    domain: integer
+  NewCapacity:
+    description: capacity built in the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  AccumulatedNewCapacity:
+    description: new capacity built in the model period and still in service
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  TotalCapacityAnnual:
+    description: all capacity in service in the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+
+  # ------------------------------------------------------ Activity variables
+  RateOfActivity:
+    description: the rate a technology runs at in a mode, in a time slice
+    dims: [REGION, TIMESLICE, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+    bounds: { lower: 0 }
+  RateOfTotalActivity:
+    description: the rate a technology runs at in a time slice, over every mode
+    dims: [REGION, TECHNOLOGY, TIMESLICE, YEAR]
+    bounds: { lower: 0 }
+
+constraints:
+  # --------------------------------------------------- Capacity adequacy A
+  CAa1_TotalNewCapacity:
+    description: >-
+      new capacity stays in service for its operational life — MathProg's
+      `sum{yy in YEAR: y-yy < OperationalLife && y-yy >= 0}`
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: AccumulatedNewCapacity == sum_back(NewCapacity, along=YEAR, window=OperationalLife)
+  CAa2_TotalAnnualCapacity:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: AccumulatedNewCapacity + ResidualCapacity == TotalCapacityAnnual
+  CAa3_TotalActivityOfEachTechnology:
+    dims: [REGION, TECHNOLOGY, TIMESLICE, YEAR]
+    expression: sum(RateOfActivity, over=MODE_OF_OPERATION) == RateOfTotalActivity
+  CAa4_Constraint_Capacity:
+    dims: [REGION, TIMESLICE, TECHNOLOGY, YEAR]
+    expression: RateOfTotalActivity <= TotalCapacityAnnual * CapacityFactor * CapacityToActivityUnit
+  CAa5_TotalNewCapacity:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "CapacityOfOneTechnologyUnit != 0"
+    expression: CapacityOfOneTechnologyUnit * NumberOfNewTechnologyUnits == NewCapacity
+
+  # --------------------------------------------------- Capacity adequacy B
+  CAb1_PlannedMaintenance:
+    description: capacity great enough to meet the annual average activity, after planned maintenance
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "AvailabilityFactor < 1"
+    expression: >-
+      sum(RateOfTotalActivity * YearSplit, over=TIMESLICE)
+      <= sum(TotalCapacityAnnual * CapacityFactor * YearSplit, over=TIMESLICE)
+      * AvailabilityFactor * CapacityToActivityUnit

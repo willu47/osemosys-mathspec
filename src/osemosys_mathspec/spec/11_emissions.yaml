@@ -1,0 +1,117 @@
+description: the emissions of each technology, their penalty, and their annual and model-period limits
+
+dimensions:
+  REGION: {}
+  TECHNOLOGY: {}
+  EMISSION:
+    description: emissions, any output tracked and penalised or capped
+  MODE_OF_OPERATION: {}
+  YEAR:
+    dtype: int
+
+given:
+  parameters:
+    DiscountRate: { dims: [REGION] }
+    YearsSinceStart: { dims: [YEAR] }
+  variables:
+    TotalAnnualTechnologyActivityByMode: { dims: [REGION, TECHNOLOGY, MODE_OF_OPERATION, YEAR] }
+  expressions:
+    DiscountedCostByTechnology: { dims: [REGION, TECHNOLOGY, YEAR] }
+
+parameters:
+  # -------------------------------------------------- Emissions & penalties
+  EmissionActivityRatio:
+    description: emission released per unit of activity in a mode
+    dims: [REGION, TECHNOLOGY, EMISSION, MODE_OF_OPERATION, YEAR]
+  EmissionsPenalty:
+    description: the cost of one unit of emission
+    dims: [REGION, EMISSION, YEAR]
+  AnnualExogenousEmission:
+    description: emission released in a year by anything outside the model
+    dims: [REGION, EMISSION, YEAR]
+  AnnualEmissionLimit:
+    description: the most emission a year may release; -1 for no limit
+    dims: [REGION, EMISSION, YEAR]
+  ModelPeriodExogenousEmission:
+    description: emission released over the model period by anything outside the model
+    dims: [REGION, EMISSION]
+  ModelPeriodEmissionLimit:
+    description: the most emission the model period may release; -1 for no limit
+    dims: [REGION, EMISSION]
+
+variables:
+  # -------------------------------------------------------------- Emissions
+  AnnualTechnologyEmissionByMode:
+    description: the emission a technology releases in a mode over the year
+    dims: [REGION, TECHNOLOGY, EMISSION, MODE_OF_OPERATION, YEAR]
+    bounds: { lower: 0 }
+  AnnualTechnologyEmission:
+    description: the emission a technology releases over the year
+    dims: [REGION, TECHNOLOGY, EMISSION, YEAR]
+    bounds: { lower: 0 }
+  AnnualTechnologyEmissionPenaltyByEmission:
+    description: the undiscounted penalty on one emission of a technology in the year
+    dims: [REGION, TECHNOLOGY, EMISSION, YEAR]
+    bounds: { lower: 0 }
+  AnnualTechnologyEmissionsPenalty:
+    description: the undiscounted penalty on every emission of a technology in the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  DiscountedTechnologyEmissionsPenalty:
+    description: the emissions penalty of the year, discounted to the first year from mid-year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  AnnualEmissions:
+    description: the emission the region releases over the year
+    dims: [REGION, EMISSION, YEAR]
+    bounds: { lower: 0 }
+  ModelPeriodEmissions:
+    description: the emission the region releases over the model period, exogenous emission included
+    dims: [REGION, EMISSION]
+    bounds: { lower: 0 }
+
+expressions:
+  DiscountedCostOfEmissionsPenalty:
+    description: the discounted emissions penalty of a technology, a cost of the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: DiscountedTechnologyEmissionsPenalty
+    adds_to: DiscountedCostByTechnology
+
+constraints:
+  # ---------------------------------------------------- Emissions accounting
+  E1_AnnualEmissionProductionByMode:
+    dims: [REGION, TECHNOLOGY, EMISSION, MODE_OF_OPERATION, YEAR]
+    where: "EmissionActivityRatio != 0"
+    expression: EmissionActivityRatio * TotalAnnualTechnologyActivityByMode == AnnualTechnologyEmissionByMode
+  E2_AnnualEmissionProduction:
+    dims: [REGION, TECHNOLOGY, EMISSION, YEAR]
+    expression: sum(AnnualTechnologyEmissionByMode, over=MODE_OF_OPERATION) == AnnualTechnologyEmission
+  E3_EmissionsPenaltyByTechAndEmission:
+    dims: [REGION, TECHNOLOGY, EMISSION, YEAR]
+    where: "EmissionsPenalty != 0"
+    expression: AnnualTechnologyEmission * EmissionsPenalty == AnnualTechnologyEmissionPenaltyByEmission
+  E4_EmissionsPenaltyByTechnology:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: sum(AnnualTechnologyEmissionPenaltyByEmission, over=EMISSION) == AnnualTechnologyEmissionsPenalty
+  E5_DiscountedEmissionsPenaltyByTechnology:
+    description: >-
+      DiscountFactorMid written out, since a fragment cannot divide by an
+      expression another fragment defines
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: >-
+      AnnualTechnologyEmissionsPenalty / (1 + DiscountRate) ** (YearsSinceStart + 0.5)
+      == DiscountedTechnologyEmissionsPenalty
+  E6_EmissionsAccounting1:
+    dims: [REGION, EMISSION, YEAR]
+    expression: sum(AnnualTechnologyEmission, over=TECHNOLOGY) == AnnualEmissions
+  E7_EmissionsAccounting2:
+    dims: [REGION, EMISSION]
+    expression: sum(AnnualEmissions, over=YEAR) == ModelPeriodEmissions - ModelPeriodExogenousEmission
+  E8_AnnualEmissionsLimit:
+    dims: [REGION, EMISSION, YEAR]
+    where: "AnnualEmissionLimit != -1"
+    expression: AnnualEmissions + AnnualExogenousEmission <= AnnualEmissionLimit
+  E9_ModelPeriodEmissionsLimit:
+    dims: [REGION, EMISSION]
+    where: "ModelPeriodEmissionLimit != -1"
+    expression: ModelPeriodEmissions <= ModelPeriodEmissionLimit

@@ -1,0 +1,92 @@
+description: >-
+  OSeMOSYS 2017_11_08, the Open Source energy MOdelling SYStem, translated from
+  the GNU MathProg file osemosys.txt. It finds the least discounted cost of
+  meeting demand for fuels in every region, over the whole model period, by
+  choosing new capacity, activity, storage and trade. Each constraint keeps the
+  name it has in the MathProg file. Where the MathProg file computes a value from
+  the coordinates of YEAR (`y - min(YEAR)`, `max(YEAR) - y`), the data supplies
+  it as a parameter (YearsSinceStart, YearsUntilEnd), because an expression here
+  cannot read a dimension's coordinates. A lag of one year, season or day type
+  (`y-1`, `ls-1`, `ld-1`) is a shift of one position, so the file assumes, as
+  OSeMOSYS does, that YEAR, SEASON and DAYTYPE are consecutive integers. The
+  default values of OSeMOSYS parameters, such as -1 for "no limit", are data
+  preparation: the data arrives with them filled in, as otoole writes it.
+
+dimensions:
+  REGION:
+    description: regions, each balancing its own fuels
+  TECHNOLOGY:
+    description: technologies, anything that converts, stores or delivers a fuel
+  TIMESLICE:
+    description: the time slices a year is divided into
+  FUEL:
+    description: fuels, energy carriers and energy services
+  YEAR:
+    description: years of the model period, consecutive integers
+    dtype: int
+
+parameters:
+  # ----------------------------------------------------------------- Global
+  YearSplit:
+    description: the fraction of a year each time slice stands for
+    dims: [TIMESLICE, YEAR]
+  DiscountRate:
+    description: the region's discount rate
+    dims: [REGION]
+  YearsSinceStart:
+    description: years from the first year of the model period to this one, `y - min(YEAR)`, data prep
+    dims: [YEAR]
+  YearsUntilEnd:
+    description: >-
+      years from this one to the end of the model period, this year included,
+      `max(YEAR) - y + 1`, data prep. `YearsSinceStart + YearsUntilEnd` is the
+      length of the model period in every year
+    dims: [YEAR]
+  OperationalLife:
+    description: the years a unit of new capacity stays in service
+    dims: [REGION, TECHNOLOGY]
+    dtype: int
+  DepreciationMethod:
+    description: 1 for sinking-fund depreciation, 2 for straight-line depreciation
+    dims: [REGION]
+    dtype: int
+
+  # ---------------------------------------------------------------- Demands
+  SpecifiedAnnualDemand:
+    description: the annual demand for a fuel that has to be met in every time slice
+    dims: [REGION, FUEL, YEAR]
+
+  # ------------------------------------------------------------ Performance
+  CapacityToActivityUnit:
+    description: the activity one unit of capacity yields when run for a whole year
+    dims: [REGION, TECHNOLOGY]
+  CapacityFactor:
+    description: the most a unit of capacity can run in a time slice, per unit
+    dims: [REGION, TECHNOLOGY, TIMESLICE, YEAR]
+  AvailabilityFactor:
+    description: the share of the year capacity is available, after planned maintenance
+    dims: [REGION, TECHNOLOGY, YEAR]
+  ResidualCapacity:
+    description: capacity already installed before the model period, still in service
+    dims: [REGION, TECHNOLOGY, YEAR]
+
+assumptions:
+  # The MathProg file's `check` statements.
+  year_split_sums_to_one:
+    description: "'Time Slice' check"
+    holds: "sum(YearSplit, over=TIMESLICE) >= 0.9999 AND sum(YearSplit, over=TIMESLICE) <= 1.0001"
+
+  # What this translation reads into the data.
+  years_since_start_counts_from_the_first_year:
+    description: YearsSinceStart is y - min(YEAR), zero in the first year
+    holds: "YearsSinceStart == 0"
+    where: "position(YEAR) == 0"
+  years_until_end_counts_to_the_last_year:
+    description: YearsUntilEnd is max(YEAR) - y + 1, one in the last year
+    holds: "YearsUntilEnd == 1"
+    where: "position(YEAR) == -1"
+  operational_life_is_not_negative:
+    description: >-
+      a window of new capacity in service spans OperationalLife years; a life
+      of 0 is an empty window, as in MathProg, where no capacity accumulates
+    holds: "OperationalLife >= 0"

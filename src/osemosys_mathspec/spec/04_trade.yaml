@@ -1,0 +1,72 @@
+description: trade in fuels between regions, along their trade routes
+
+dimensions:
+  REGION: {}
+  _REGION:
+    description: >-
+      the same labels as REGION, standing for the other end of a trade route —
+      OSeMOSYS's `rr`
+  TIMESLICE: {}
+  FUEL: {}
+  YEAR:
+    dtype: int
+
+relations:
+  TradeReverse:
+    description: >-
+      every (REGION, _REGION) pair mapped to the same pair the other way round:
+      one row (r, rr, rr, r) per pair, data prep. It is how a trade flow is read
+      from the far end of its route
+    key: [REGION, _REGION]
+    values: { reverse_region: REGION, reverse_partner: _REGION }
+
+given:
+  expressions:
+    OutflowEachTS: { dims: [REGION, TIMESLICE, FUEL, YEAR] }
+    OutflowAnnual: { dims: [REGION, FUEL, YEAR] }
+
+parameters:
+  # ----------------------------------------------------------------- Global
+  TradeRoute:
+    description: one where fuel may be traded from the region to the other, zero elsewhere
+    dims: [REGION, _REGION, FUEL, YEAR]
+
+variables:
+  # ------------------------------------------------------ Activity variables
+  Trade:
+    description: the fuel sent from the region to the other in a time slice; negative where it is received
+    dims: [REGION, _REGION, TIMESLICE, FUEL, YEAR]
+  TradeAnnual:
+    description: the fuel sent from the region to the other over the year
+    dims: [REGION, _REGION, FUEL, YEAR]
+
+expressions:
+  OutflowEachTSOfTrade:
+    description: the fuel the region sends to other regions in a time slice, less what it receives
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    expression: sum(Trade * TradeRoute, over=_REGION)
+    adds_to: OutflowEachTS
+  OutflowAnnualOfTrade:
+    description: the fuel the region sends to other regions over the year, less what it receives
+    dims: [REGION, FUEL, YEAR]
+    expression: sum(TradeAnnual * TradeRoute, over=_REGION)
+    adds_to: OutflowAnnual
+
+constraints:
+  # ------------------------------------------------------ Energy balance A
+  EBa10_EnergyBalanceEachTS4:
+    description: what one region sends another, the other receives — `Trade[r,rr] = -Trade[rr,r]`
+    dims: [REGION, _REGION, TIMESLICE, FUEL, YEAR]
+    where: "TradeRoute != 0"
+    expression: >-
+      Trade == -at(Trade, by=TradeReverse, over=[reverse_region, reverse_partner], into=[REGION, _REGION])
+
+  # ------------------------------------------------------ Energy balance B
+  EBb3_EnergyBalanceEachYear3:
+    dims: [REGION, _REGION, FUEL, YEAR]
+    expression: sum(Trade, over=TIMESLICE) == TradeAnnual
+
+assumptions:
+  # What this translation reads into the data.
+  trade_route_is_binary:
+    holds: "TradeRoute == 0 OR TradeRoute == 1"

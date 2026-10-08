@@ -1,0 +1,185 @@
+description: the discounted capital, operating and salvage costs, and the objective that minimises their total
+
+dimensions:
+  REGION: {}
+  TECHNOLOGY: {}
+  MODE_OF_OPERATION: {}
+  YEAR:
+    dtype: int
+
+given:
+  parameters:
+    DiscountRate: { dims: [REGION] }
+    YearsSinceStart: { dims: [YEAR] }
+    YearsUntilEnd: { dims: [YEAR] }
+    OperationalLife: { dims: [REGION, TECHNOLOGY], dtype: int }
+    DepreciationMethod: { dims: [REGION], dtype: int }
+  variables:
+    NewCapacity: { dims: [REGION, TECHNOLOGY, YEAR] }
+    TotalCapacityAnnual: { dims: [REGION, TECHNOLOGY, YEAR] }
+    TotalAnnualTechnologyActivityByMode: { dims: [REGION, TECHNOLOGY, MODE_OF_OPERATION, YEAR] }
+
+parameters:
+  # ----------------------------------------------------------------- Global
+  DiscountRateIdv:
+    description: >-
+      the technology's own discount rate, which only its capital recovery factor
+      reads; DiscountRate where the data gives none
+    dims: [REGION, TECHNOLOGY]
+
+  # ------------------------------------------------------- Technology costs
+  CapitalCost:
+    description: the cost of one unit of new capacity
+    dims: [REGION, TECHNOLOGY, YEAR]
+  VariableCost:
+    description: the cost of one unit of activity in a mode
+    dims: [REGION, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+  FixedCost:
+    description: the annual cost of one unit of installed capacity
+    dims: [REGION, TECHNOLOGY, YEAR]
+
+variables:
+  # ------------------------------------------------------- Costing variables
+  CapitalInvestment:
+    description: the undiscounted cost of the capacity built in the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  DiscountedCapitalInvestment:
+    description: the cost of the capacity built in the year, discounted to the first year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  SalvageValue:
+    description: what the capacity built in the year is still worth at the end of the model period
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  DiscountedSalvageValue:
+    description: the salvage value, discounted to the first year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  OperatingCost:
+    description: the undiscounted fixed and variable operating cost of the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  DiscountedOperatingCost:
+    description: the operating cost of the year, discounted to the first year from mid-year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  AnnualVariableOperatingCost:
+    description: the undiscounted variable operating cost of the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  AnnualFixedOperatingCost:
+    description: the undiscounted fixed operating cost of the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  TotalDiscountedCostByTechnology:
+    description: every discounted cost of a technology in the year, less its discounted salvage value
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  TotalDiscountedCost:
+    description: every discounted cost of the region in the year
+    dims: [REGION, YEAR]
+    bounds: { lower: 0 }
+
+expressions:
+  DiscountFactor:
+    description: what one unit of cost at the start of the year is worth in the first year
+    dims: [REGION, YEAR]
+    expression: (1 + DiscountRate) ** YearsSinceStart
+  DiscountFactorMid:
+    description: what one unit of cost in the middle of the year is worth in the first year
+    dims: [REGION, YEAR]
+    expression: (1 + DiscountRate) ** (YearsSinceStart + 0.5)
+  CapitalRecoveryFactor:
+    description: >-
+      the share of a technology's capital cost paid each year over its
+      operational life, at its own discount rate DiscountRateIdv
+    dims: [REGION, TECHNOLOGY]
+    expression: (1 - (1 + DiscountRateIdv) ** (-1)) / (1 - (1 + DiscountRateIdv) ** (-OperationalLife))
+  PvAnnuity:
+    description: the present value of an annuity over a technology's operational life
+    dims: [REGION, TECHNOLOGY]
+    expression: (1 - (1 + DiscountRate) ** (-OperationalLife)) * (1 + DiscountRate) / DiscountRate
+  DiscountedCostByTechnology:
+    description: >-
+      the discounted cost of a technology in the year, less its discounted
+      salvage value, with every cost another fragment adds to it
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: DiscountedOperatingCost + DiscountedCapitalInvestment - DiscountedSalvageValue
+  DiscountedCostByRegion:
+    description: >-
+      the discounted cost of every technology in the region in the year, with
+      every cost another fragment adds to it
+    dims: [REGION, YEAR]
+    expression: sum(TotalDiscountedCostByTechnology, over=TECHNOLOGY)
+
+constraints:
+  # ---------------------------------------------------------- Capital costs
+  CC1_UndiscountedCapitalInvestment:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: CapitalCost * NewCapacity * CapitalRecoveryFactor * PvAnnuity == CapitalInvestment
+  CC2_DiscountingCapitalInvestment:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: CapitalInvestment / DiscountFactor == DiscountedCapitalInvestment
+
+  # ---------------------------------------------------------- Salvage value
+  SV1_SalvageValueAtEndOfPeriod1:
+    description: sinking-fund depreciation at a positive discount rate
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "DepreciationMethod == 1 AND OperationalLife > YearsUntilEnd AND DiscountRate > 0"
+    expression: >-
+      SalvageValue == CapitalCost * NewCapacity * CapitalRecoveryFactor * PvAnnuity
+      * (1 - ((1 + DiscountRate) ** YearsUntilEnd - 1) / ((1 + DiscountRate) ** OperationalLife - 1))
+  SV2_SalvageValueAtEndOfPeriod2:
+    description: straight-line depreciation, or sinking-fund depreciation at a zero discount rate
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: >-
+      (DepreciationMethod == 1 AND OperationalLife > YearsUntilEnd AND DiscountRate == 0)
+      OR (DepreciationMethod == 2 AND OperationalLife > YearsUntilEnd)
+    expression: >-
+      SalvageValue == CapitalCost * NewCapacity * CapitalRecoveryFactor * PvAnnuity
+      * (1 - YearsUntilEnd / OperationalLife)
+  SV3_SalvageValueAtEndOfPeriod3:
+    description: capacity that reaches the end of its life within the model period is worth nothing at its end
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "OperationalLife <= YearsUntilEnd"
+    expression: SalvageValue == 0
+  SV4_SalvageValueDiscountedToStartYear:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    description: >-
+      the salvage value discounted over the whole model period;
+      `YearsSinceStart + YearsUntilEnd` is `max(YEAR) - min(YEAR) + 1`
+    expression: DiscountedSalvageValue == SalvageValue / (1 + DiscountRate) ** (YearsSinceStart + YearsUntilEnd)
+
+  # -------------------------------------------------------- Operating costs
+  OC1_OperatingCostsVariable:
+    description: >-
+      MathProg indexes this over TIMESLICE too, and no term reads it, so each
+      row there is the same row repeated; it is stated once
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "sum(VariableCost, over=MODE_OF_OPERATION) != 0"
+    expression: >-
+      sum(TotalAnnualTechnologyActivityByMode * VariableCost, over=MODE_OF_OPERATION)
+      == AnnualVariableOperatingCost
+  OC2_OperatingCostsFixedAnnual:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: TotalCapacityAnnual * FixedCost == AnnualFixedOperatingCost
+  OC3_OperatingCostsTotalAnnual:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: AnnualFixedOperatingCost + AnnualVariableOperatingCost == OperatingCost
+  OC4_DiscountedOperatingCostsTotalAnnual:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: OperatingCost / DiscountFactorMid == DiscountedOperatingCost
+
+  # ------------------------------------------------- Total discounted costs
+  TDC1_TotalDiscountedCostByTechnology:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: DiscountedCostByTechnology == TotalDiscountedCostByTechnology
+  TDC2_TotalDiscountedCost:
+    dims: [REGION, YEAR]
+    expression: DiscountedCostByRegion == TotalDiscountedCost
+
+objective:
+  description: the discounted cost of the whole system over the model period
+  sense: minimize
+  expression: sum(TotalDiscountedCost)

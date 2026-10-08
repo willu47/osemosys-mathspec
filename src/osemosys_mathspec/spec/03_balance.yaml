@@ -1,0 +1,153 @@
+description: the energy balance, production and use of each fuel meeting its demand in a time slice and a year
+
+dimensions:
+  REGION: {}
+  TECHNOLOGY: {}
+  TIMESLICE: {}
+  FUEL: {}
+  MODE_OF_OPERATION: {}
+  YEAR:
+    dtype: int
+
+given:
+  parameters:
+    YearSplit: { dims: [TIMESLICE, YEAR] }
+    SpecifiedAnnualDemand: { dims: [REGION, FUEL, YEAR] }
+  variables:
+    RateOfDemand: { dims: [REGION, TIMESLICE, FUEL, YEAR] }
+    RateOfActivity: { dims: [REGION, TIMESLICE, TECHNOLOGY, MODE_OF_OPERATION, YEAR] }
+
+parameters:
+  # ---------------------------------------------------------------- Demands
+  AccumulatedAnnualDemand:
+    description: an annual demand for a fuel that may be met at any time of the year
+    dims: [REGION, FUEL, YEAR]
+
+  # ------------------------------------------------------------ Performance
+  InputActivityRatio:
+    description: fuel used per unit of activity in a mode
+    dims: [REGION, TECHNOLOGY, FUEL, MODE_OF_OPERATION, YEAR]
+  OutputActivityRatio:
+    description: fuel produced per unit of activity in a mode
+    dims: [REGION, TECHNOLOGY, FUEL, MODE_OF_OPERATION, YEAR]
+
+variables:
+  # ---------------------------------------------------------------- Demands
+  Demand:
+    description: the fuel demanded in a time slice
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+
+  # ------------------------------------------------------ Activity variables
+  RateOfProductionByTechnologyByMode:
+    description: >-
+      the rate a technology produces a fuel at in a mode; it exists only where
+      the mode produces the fuel, which is where MathProg's sum over modes reads it
+    dims: [REGION, TIMESLICE, TECHNOLOGY, MODE_OF_OPERATION, FUEL, YEAR]
+    where: "OutputActivityRatio != 0"
+    bounds: { lower: 0 }
+  RateOfProductionByTechnology:
+    description: the rate a technology produces a fuel at, over every mode
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+  RateOfProduction:
+    description: the rate a fuel is produced at, over every technology
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+  Production:
+    description: the fuel produced in a time slice
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+  RateOfUseByTechnologyByMode:
+    description: >-
+      the rate a technology uses a fuel at in a mode; it exists only where the
+      mode uses the fuel, which is where MathProg's sum over modes reads it
+    dims: [REGION, TIMESLICE, TECHNOLOGY, MODE_OF_OPERATION, FUEL, YEAR]
+    where: "InputActivityRatio != 0"
+    bounds: { lower: 0 }
+  RateOfUseByTechnology:
+    description: the rate a technology uses a fuel at, over every mode
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+  RateOfUse:
+    description: the rate a fuel is used at, over every technology
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+  Use:
+    description: the fuel used in a time slice
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+  ProductionAnnual:
+    description: the fuel produced over the year
+    dims: [REGION, FUEL, YEAR]
+    bounds: { lower: 0 }
+  UseAnnual:
+    description: the fuel used over the year
+    dims: [REGION, FUEL, YEAR]
+    bounds: { lower: 0 }
+
+expressions:
+  OutflowEachTS:
+    description: >-
+      the fuel production has to cover in a time slice, demand and use, with
+      every outflow another fragment adds to it
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    expression: Demand + Use
+  OutflowAnnual:
+    description: >-
+      the fuel production has to cover over the year, use and accumulated
+      demand, with every outflow another fragment adds to it
+    dims: [REGION, FUEL, YEAR]
+    expression: UseAnnual + AccumulatedAnnualDemand
+
+constraints:
+  # ------------------------------------------------------ Energy balance A
+  EBa1_RateOfFuelProduction1:
+    dims: [REGION, TIMESLICE, FUEL, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+    where: "OutputActivityRatio != 0"
+    expression: RateOfActivity * OutputActivityRatio == RateOfProductionByTechnologyByMode
+  EBa2_RateOfFuelProduction2:
+    dims: [REGION, TIMESLICE, FUEL, TECHNOLOGY, YEAR]
+    expression: sum(RateOfProductionByTechnologyByMode, over=MODE_OF_OPERATION) == RateOfProductionByTechnology
+  EBa3_RateOfFuelProduction3:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "sum(sum(OutputActivityRatio, over=TECHNOLOGY), over=MODE_OF_OPERATION) != 0"
+    expression: sum(RateOfProductionByTechnology, over=TECHNOLOGY) == RateOfProduction
+  EBa4_RateOfFuelUse1:
+    dims: [REGION, TIMESLICE, FUEL, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+    where: "InputActivityRatio != 0"
+    expression: RateOfActivity * InputActivityRatio == RateOfUseByTechnologyByMode
+  EBa5_RateOfFuelUse2:
+    dims: [REGION, TIMESLICE, FUEL, TECHNOLOGY, YEAR]
+    where: "sum(InputActivityRatio, over=MODE_OF_OPERATION) != 0"
+    expression: sum(RateOfUseByTechnologyByMode, over=MODE_OF_OPERATION) == RateOfUseByTechnology
+  EBa6_RateOfFuelUse3:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "sum(sum(InputActivityRatio, over=TECHNOLOGY), over=MODE_OF_OPERATION) != 0"
+    expression: sum(RateOfUseByTechnology, over=TECHNOLOGY) == RateOfUse
+  EBa7_EnergyBalanceEachTS1:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "sum(sum(OutputActivityRatio, over=TECHNOLOGY), over=MODE_OF_OPERATION) != 0"
+    expression: RateOfProduction * YearSplit == Production
+  EBa8_EnergyBalanceEachTS2:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "sum(sum(InputActivityRatio, over=TECHNOLOGY), over=MODE_OF_OPERATION) != 0"
+    expression: RateOfUse * YearSplit == Use
+  EBa9_EnergyBalanceEachTS3:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "SpecifiedAnnualDemand != 0"
+    expression: RateOfDemand * YearSplit == Demand
+  EBa11_EnergyBalanceEachTS5:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    expression: Production >= OutflowEachTS
+
+  # ------------------------------------------------------ Energy balance B
+  EBb1_EnergyBalanceEachYear1:
+    dims: [REGION, FUEL, YEAR]
+    expression: sum(Production, over=TIMESLICE) == ProductionAnnual
+  EBb2_EnergyBalanceEachYear2:
+    dims: [REGION, FUEL, YEAR]
+    expression: sum(Use, over=TIMESLICE) == UseAnnual
+  EBb4_EnergyBalanceEachYear4:
+    dims: [REGION, FUEL, YEAR]
+    expression: ProductionAnnual >= OutflowAnnual
