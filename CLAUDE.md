@@ -19,7 +19,7 @@ uv run python -c "import mathspec, osemosys_mathspec as o; print(mathspec.advisi
 uv run python -c "import mathspec, osemosys_mathspec as o; print(mathspec.to_markdown(o.load_spec()), end='')" > osemosys.md
 ```
 
-No linter or formatter is configured in `pyproject.toml`. The code uses single quotes, `from __future__ import annotations`, and lines up to about 120 characters.
+CI (`.github/workflows/ci.yml`) runs `uv sync --locked` and `uv run pytest` on pushes to `main` and on pull requests. No linter or formatter is configured in `pyproject.toml`. The code uses single quotes, `from __future__ import annotations`, and lines up to about 120 characters.
 
 ## Architecture
 
