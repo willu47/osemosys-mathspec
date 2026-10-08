@@ -1,0 +1,30 @@
+[project]
+name = "osemosys-mathspec"
+version = "0.1.0"
+description = "OSeMOSYS with its formulation in a mathspec file, built with linopy and fed by otoole"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "highspy>=1.15.1",
+    "linopy>=0.9.1",
+    "mathspec==0.2.1",
+    "otoole>=1.1.5",
+]
+
+[project.scripts]
+osemosys = "osemosys_mathspec.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/osemosys_mathspec"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

@@ -1,0 +1,16 @@
+{
+    "yaml.disableSchemaDetection": [
+        "**/.github/workflows/*.yml",
+        "**/.github/workflows/*.yaml",
+        "**/.gitea/workflows/*.yml",
+        "**/.gitea/workflows/*.yaml",
+        "**/.forgejo/workflows/*.yml",
+        "**/.forgejo/workflows/*.yaml"
+    ],
+    "yaml.schemas": {
+        "https://raw.githubusercontent.com/energy-models/mathspec/main/schema/mathspec.schema.json": [
+            "*.spec.yaml",
+            "file:///home/willusher/repositories/osemosys-mathspec/osemosys.yaml"
+        ]
+    }
+}

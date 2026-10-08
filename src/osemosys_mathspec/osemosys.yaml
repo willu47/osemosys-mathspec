@@ -1,0 +1,1192 @@
+description: >-
+  OSeMOSYS 2017_11_08, the Open Source energy MOdelling SYStem, translated from
+  the GNU MathProg file osemosys.txt. It finds the least discounted cost of
+  meeting demand for fuels in every region, over the whole model period, by
+  choosing new capacity, activity, storage and trade. Each constraint keeps the
+  name it has in the MathProg file. Where the MathProg file computes a value from
+  the coordinates of YEAR (`y - min(YEAR)`, `max(YEAR) - y`), the data supplies
+  it as a parameter (YearsSinceStart, YearsUntilEnd), because an expression here
+  cannot read a dimension's coordinates. A lag of one year, season or day type
+  (`y-1`, `ls-1`, `ld-1`) is a shift of one position, so the file assumes, as
+  OSeMOSYS does, that YEAR, SEASON and DAYTYPE are consecutive integers. The
+  default values of OSeMOSYS parameters, such as -1 for "no limit", are data
+  preparation: the data arrives with them filled in, as otoole writes it.
+
+dimensions:
+  REGION:
+    description: regions, each balancing its own fuels
+  _REGION:
+    description: >-
+      the same labels as REGION, standing for the other end of a trade route —
+      OSeMOSYS's `rr`
+  TECHNOLOGY:
+    description: technologies, anything that converts, stores or delivers a fuel
+  TIMESLICE:
+    description: the time slices a year is divided into
+  FUEL:
+    description: fuels, energy carriers and energy services
+  EMISSION:
+    description: emissions, any output tracked and penalised or capped
+  MODE_OF_OPERATION:
+    description: the modes a technology runs in, each with its own input and output ratios
+  YEAR:
+    description: years of the model period, consecutive integers
+    dtype: int
+  SEASON:
+    description: seasons, consecutive integers in their chronological order
+    dtype: int
+  DAYTYPE:
+    description: day types, consecutive integers in their chronological order
+    dtype: int
+  DAILYTIMEBRACKET:
+    description: the brackets a day is divided into, integers in their chronological order
+    dtype: int
+  STORAGE:
+    description: storage facilities
+
+relations:
+  TradeReverse:
+    description: >-
+      every (REGION, _REGION) pair mapped to the same pair the other way round:
+      one row (r, rr, rr, r) per pair, data prep. It is how a trade flow is read
+      from the far end of its route
+    key: [REGION, _REGION]
+    values: { reverse_region: REGION, reverse_partner: _REGION }
+
+parameters:
+  # ----------------------------------------------------------------- Global
+  YearSplit:
+    description: the fraction of a year each time slice stands for
+    dims: [TIMESLICE, YEAR]
+  DiscountRate:
+    description: the region's discount rate
+    dims: [REGION]
+  DiscountRateIdv:
+    description: >-
+      the technology's own discount rate, which only its capital recovery factor
+      reads; DiscountRate where the data gives none
+    dims: [REGION, TECHNOLOGY]
+  YearsSinceStart:
+    description: years from the first year of the model period to this one, `y - min(YEAR)`, data prep
+    dims: [YEAR]
+  YearsUntilEnd:
+    description: >-
+      years from this one to the end of the model period, this year included,
+      `max(YEAR) - y + 1`, data prep. `YearsSinceStart + YearsUntilEnd` is the
+      length of the model period in every year
+    dims: [YEAR]
+  OperationalLife:
+    description: the years a unit of new capacity stays in service
+    dims: [REGION, TECHNOLOGY]
+    dtype: int
+  DiscountRateStorage:
+    description: the discount rate of a storage facility
+    dims: [REGION, STORAGE]
+  DaySplit:
+    description: the fraction of a year one daily time bracket stands for
+    dims: [DAILYTIMEBRACKET, YEAR]
+  Conversionls:
+    description: one where the time slice falls in the season, zero elsewhere
+    dims: [TIMESLICE, SEASON]
+  Conversionld:
+    description: one where the time slice falls on the day type, zero elsewhere
+    dims: [TIMESLICE, DAYTYPE]
+  Conversionlh:
+    description: one where the time slice falls in the daily time bracket, zero elsewhere
+    dims: [TIMESLICE, DAILYTIMEBRACKET]
+  DaysInDayType:
+    description: how many days of the day type one week of the season holds
+    dims: [SEASON, DAYTYPE, YEAR]
+  TradeRoute:
+    description: one where fuel may be traded from the region to the other, zero elsewhere
+    dims: [REGION, _REGION, FUEL, YEAR]
+  DepreciationMethod:
+    description: 1 for sinking-fund depreciation, 2 for straight-line depreciation
+    dims: [REGION]
+    dtype: int
+  DailyTimeBracketCount:
+    description: >-
+      how many daily time brackets there are, data prep — the width of a
+      window that reaches back to the first bracket of the day from any other
+    dims: []
+    dtype: int
+
+  # ---------------------------------------------------------------- Demands
+  SpecifiedAnnualDemand:
+    description: the annual demand for a fuel that has to be met in every time slice
+    dims: [REGION, FUEL, YEAR]
+  SpecifiedDemandProfile:
+    description: the share of the annual specified demand falling in each time slice
+    dims: [REGION, FUEL, TIMESLICE, YEAR]
+  AccumulatedAnnualDemand:
+    description: an annual demand for a fuel that may be met at any time of the year
+    dims: [REGION, FUEL, YEAR]
+
+  # ------------------------------------------------------------ Performance
+  CapacityToActivityUnit:
+    description: the activity one unit of capacity yields when run for a whole year
+    dims: [REGION, TECHNOLOGY]
+  CapacityFactor:
+    description: the most a unit of capacity can run in a time slice, per unit
+    dims: [REGION, TECHNOLOGY, TIMESLICE, YEAR]
+  AvailabilityFactor:
+    description: the share of the year capacity is available, after planned maintenance
+    dims: [REGION, TECHNOLOGY, YEAR]
+  ResidualCapacity:
+    description: capacity already installed before the model period, still in service
+    dims: [REGION, TECHNOLOGY, YEAR]
+  InputActivityRatio:
+    description: fuel used per unit of activity in a mode
+    dims: [REGION, TECHNOLOGY, FUEL, MODE_OF_OPERATION, YEAR]
+  OutputActivityRatio:
+    description: fuel produced per unit of activity in a mode
+    dims: [REGION, TECHNOLOGY, FUEL, MODE_OF_OPERATION, YEAR]
+
+  # ------------------------------------------------------- Technology costs
+  CapitalCost:
+    description: the cost of one unit of new capacity
+    dims: [REGION, TECHNOLOGY, YEAR]
+  VariableCost:
+    description: the cost of one unit of activity in a mode
+    dims: [REGION, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+  FixedCost:
+    description: the annual cost of one unit of installed capacity
+    dims: [REGION, TECHNOLOGY, YEAR]
+
+  # ---------------------------------------------------------------- Storage
+  TechnologyToStorage:
+    description: the share of a technology's activity in a mode that charges the storage
+    dims: [REGION, TECHNOLOGY, STORAGE, MODE_OF_OPERATION]
+  TechnologyFromStorage:
+    description: the share of a technology's activity in a mode that discharges the storage
+    dims: [REGION, TECHNOLOGY, STORAGE, MODE_OF_OPERATION]
+  StorageLevelStart:
+    description: the storage level at the start of the first year
+    dims: [REGION, STORAGE]
+  StorageMaxChargeRate:
+    description: the highest rate the storage charges at
+    dims: [REGION, STORAGE]
+  StorageMaxDischargeRate:
+    description: the highest rate the storage discharges at
+    dims: [REGION, STORAGE]
+  MinStorageCharge:
+    description: the lowest storage level, as a share of the storage's capacity
+    dims: [REGION, STORAGE, YEAR]
+  OperationalLifeStorage:
+    description: the years new storage capacity stays in service
+    dims: [REGION, STORAGE]
+    dtype: int
+  CapitalCostStorage:
+    description: the cost of one unit of new storage capacity
+    dims: [REGION, STORAGE, YEAR]
+  ResidualStorageCapacity:
+    description: storage capacity already installed before the model period
+    dims: [REGION, STORAGE, YEAR]
+
+  # --------------------------------------------------- Capacity constraints
+  CapacityOfOneTechnologyUnit:
+    description: the size of one unit where capacity is built in whole units; zero where it is continuous
+    dims: [REGION, TECHNOLOGY, YEAR]
+  TotalAnnualMaxCapacity:
+    description: the most capacity a technology may have in a year; -1 for no limit
+    dims: [REGION, TECHNOLOGY, YEAR]
+  TotalAnnualMinCapacity:
+    description: the least capacity a technology must have in a year
+    dims: [REGION, TECHNOLOGY, YEAR]
+
+  # ------------------------------------------------- Investment constraints
+  TotalAnnualMaxCapacityInvestment:
+    description: the most new capacity a technology may gain in a year; -1 for no limit
+    dims: [REGION, TECHNOLOGY, YEAR]
+  TotalAnnualMinCapacityInvestment:
+    description: the least new capacity a technology must gain in a year
+    dims: [REGION, TECHNOLOGY, YEAR]
+
+  # --------------------------------------------------- Activity constraints
+  TotalTechnologyAnnualActivityUpperLimit:
+    description: the most activity a technology may have in a year; -1 for no limit
+    dims: [REGION, TECHNOLOGY, YEAR]
+  TotalTechnologyAnnualActivityLowerLimit:
+    description: the least activity a technology must have in a year
+    dims: [REGION, TECHNOLOGY, YEAR]
+  TotalTechnologyModelPeriodActivityUpperLimit:
+    description: the most activity a technology may have over the model period; -1 for no limit
+    dims: [REGION, TECHNOLOGY]
+  TotalTechnologyModelPeriodActivityLowerLimit:
+    description: the least activity a technology must have over the model period
+    dims: [REGION, TECHNOLOGY]
+
+  # --------------------------------------------------------- Reserve margin
+  ReserveMarginTagTechnology:
+    description: the share of a technology's capacity that counts towards the reserve margin
+    dims: [REGION, TECHNOLOGY, YEAR]
+  ReserveMarginTagFuel:
+    description: one where production of the fuel needs a reserve margin, zero elsewhere
+    dims: [REGION, FUEL, YEAR]
+  ReserveMargin:
+    description: the capacity that has to stand behind peak production, as a multiple of it
+    dims: [REGION, YEAR]
+
+  # ------------------------------------------------ RE generation target
+  RETagTechnology:
+    description: one where the technology is renewable, zero elsewhere
+    dims: [REGION, TECHNOLOGY, YEAR]
+  RETagFuel:
+    description: one where the fuel counts towards the renewable target, zero elsewhere
+    dims: [REGION, FUEL, YEAR]
+  REMinProductionTarget:
+    description: the least share of target-fuel production that has to be renewable
+    dims: [REGION, YEAR]
+
+  # -------------------------------------------------- Emissions & penalties
+  EmissionActivityRatio:
+    description: emission released per unit of activity in a mode
+    dims: [REGION, TECHNOLOGY, EMISSION, MODE_OF_OPERATION, YEAR]
+  EmissionsPenalty:
+    description: the cost of one unit of emission
+    dims: [REGION, EMISSION, YEAR]
+  AnnualExogenousEmission:
+    description: emission released in a year by anything outside the model
+    dims: [REGION, EMISSION, YEAR]
+  AnnualEmissionLimit:
+    description: the most emission a year may release; -1 for no limit
+    dims: [REGION, EMISSION, YEAR]
+  ModelPeriodExogenousEmission:
+    description: emission released over the model period by anything outside the model
+    dims: [REGION, EMISSION]
+  ModelPeriodEmissionLimit:
+    description: the most emission the model period may release; -1 for no limit
+    dims: [REGION, EMISSION]
+
+variables:
+  # ---------------------------------------------------------------- Demands
+  RateOfDemand:
+    description: the rate a fuel is demanded at in a time slice
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+  Demand:
+    description: the fuel demanded in a time slice
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+
+  # ---------------------------------------------------------------- Storage
+  RateOfStorageCharge:
+    description: the rate the storage charges at in a daily time bracket
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+  RateOfStorageDischarge:
+    description: the rate the storage discharges at in a daily time bracket
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+  NetChargeWithinYear:
+    description: the net charge into the storage in a daily time bracket, over the year
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+  NetChargeWithinDay:
+    description: the net charge into the storage in a daily time bracket, over one day
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+  StorageLevelYearStart:
+    description: the storage level at the start of the year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  StorageLevelYearFinish:
+    description: the storage level at the end of the year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  StorageLevelSeasonStart:
+    description: the storage level at the start of the season
+    dims: [REGION, STORAGE, SEASON, YEAR]
+    bounds: { lower: 0 }
+  StorageLevelDayTypeStart:
+    description: the storage level at the start of the first day of the day type
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    bounds: { lower: 0 }
+  StorageLevelDayTypeFinish:
+    description: the storage level at the end of the last day of the day type
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    bounds: { lower: 0 }
+  StorageLowerLimit:
+    description: the lowest level the storage may hold
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  StorageUpperLimit:
+    description: the highest level the storage may hold, its capacity
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  AccumulatedNewStorageCapacity:
+    description: new storage capacity built in the model period and still in service
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  NewStorageCapacity:
+    description: storage capacity built in the year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  CapitalInvestmentStorage:
+    description: the undiscounted cost of the storage capacity built in the year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  DiscountedCapitalInvestmentStorage:
+    description: the cost of the storage capacity built in the year, discounted to the first year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  SalvageValueStorage:
+    description: what the storage capacity built in the year is still worth at the end of the model period
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  DiscountedSalvageValueStorage:
+    description: the salvage value of the storage, discounted to the first year
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+  TotalDiscountedStorageCost:
+    description: the discounted cost of the storage, less its discounted salvage value
+    dims: [REGION, STORAGE, YEAR]
+    bounds: { lower: 0 }
+
+  # ------------------------------------------------------ Capacity variables
+  NumberOfNewTechnologyUnits:
+    description: >-
+      how many whole units are built in the year; it exists only where
+      capacity comes in units, since nothing reads it anywhere else
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "CapacityOfOneTechnologyUnit != 0"
+    bounds: { lower: 0 }
+    domain: integer
+  NewCapacity:
+    description: capacity built in the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  AccumulatedNewCapacity:
+    description: new capacity built in the model period and still in service
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  TotalCapacityAnnual:
+    description: all capacity in service in the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+
+  # ------------------------------------------------------ Activity variables
+  RateOfActivity:
+    description: the rate a technology runs at in a mode, in a time slice
+    dims: [REGION, TIMESLICE, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+    bounds: { lower: 0 }
+  RateOfTotalActivity:
+    description: the rate a technology runs at in a time slice, over every mode
+    dims: [REGION, TECHNOLOGY, TIMESLICE, YEAR]
+    bounds: { lower: 0 }
+  TotalTechnologyAnnualActivity:
+    description: a technology's activity over the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  TotalAnnualTechnologyActivityByMode:
+    description: a technology's activity in a mode over the year
+    dims: [REGION, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+    bounds: { lower: 0 }
+  TotalTechnologyModelPeriodActivity:
+    description: a technology's activity over the model period
+    dims: [REGION, TECHNOLOGY]
+  RateOfProductionByTechnologyByMode:
+    description: >-
+      the rate a technology produces a fuel at in a mode; it exists only where
+      the mode produces the fuel, which is where MathProg's sum over modes reads it
+    dims: [REGION, TIMESLICE, TECHNOLOGY, MODE_OF_OPERATION, FUEL, YEAR]
+    where: "OutputActivityRatio != 0"
+    bounds: { lower: 0 }
+  RateOfProductionByTechnology:
+    description: the rate a technology produces a fuel at, over every mode
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+  ProductionByTechnology:
+    description: the fuel a technology produces in a time slice
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+  ProductionByTechnologyAnnual:
+    description: the fuel a technology produces over the year
+    dims: [REGION, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+  RateOfProduction:
+    description: the rate a fuel is produced at, over every technology
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+  Production:
+    description: the fuel produced in a time slice
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+  RateOfUseByTechnologyByMode:
+    description: >-
+      the rate a technology uses a fuel at in a mode; it exists only where the
+      mode uses the fuel, which is where MathProg's sum over modes reads it
+    dims: [REGION, TIMESLICE, TECHNOLOGY, MODE_OF_OPERATION, FUEL, YEAR]
+    where: "InputActivityRatio != 0"
+    bounds: { lower: 0 }
+  RateOfUseByTechnology:
+    description: the rate a technology uses a fuel at, over every mode
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+  UseByTechnologyAnnual:
+    description: the fuel a technology uses over the year
+    dims: [REGION, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+  RateOfUse:
+    description: the rate a fuel is used at, over every technology
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+  UseByTechnology:
+    description: the fuel a technology uses in a time slice
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    bounds: { lower: 0 }
+  Use:
+    description: the fuel used in a time slice
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    bounds: { lower: 0 }
+  Trade:
+    description: the fuel sent from the region to the other in a time slice; negative where it is received
+    dims: [REGION, _REGION, TIMESLICE, FUEL, YEAR]
+  TradeAnnual:
+    description: the fuel sent from the region to the other over the year
+    dims: [REGION, _REGION, FUEL, YEAR]
+  ProductionAnnual:
+    description: the fuel produced over the year
+    dims: [REGION, FUEL, YEAR]
+    bounds: { lower: 0 }
+  UseAnnual:
+    description: the fuel used over the year
+    dims: [REGION, FUEL, YEAR]
+    bounds: { lower: 0 }
+
+  # ------------------------------------------------------- Costing variables
+  CapitalInvestment:
+    description: the undiscounted cost of the capacity built in the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  DiscountedCapitalInvestment:
+    description: the cost of the capacity built in the year, discounted to the first year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  SalvageValue:
+    description: what the capacity built in the year is still worth at the end of the model period
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  DiscountedSalvageValue:
+    description: the salvage value, discounted to the first year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  OperatingCost:
+    description: the undiscounted fixed and variable operating cost of the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  DiscountedOperatingCost:
+    description: the operating cost of the year, discounted to the first year from mid-year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  AnnualVariableOperatingCost:
+    description: the undiscounted variable operating cost of the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  AnnualFixedOperatingCost:
+    description: the undiscounted fixed operating cost of the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  TotalDiscountedCostByTechnology:
+    description: every discounted cost of a technology in the year, less its discounted salvage value
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  TotalDiscountedCost:
+    description: every discounted cost of the region in the year
+    dims: [REGION, YEAR]
+    bounds: { lower: 0 }
+  ModelPeriodCostByRegion:
+    description: every discounted cost of the region over the model period
+    dims: [REGION]
+    bounds: { lower: 0 }
+
+  # --------------------------------------------------------- Reserve margin
+  TotalCapacityInReserveMargin:
+    description: the capacity that counts towards the reserve margin, in activity units
+    dims: [REGION, YEAR]
+    bounds: { lower: 0 }
+  DemandNeedingReserveMargin:
+    description: the rate of production that needs a reserve margin, in a time slice
+    dims: [REGION, TIMESLICE, YEAR]
+    bounds: { lower: 0 }
+
+  # --------------------------------------------------------- RE gen target
+  TotalREProductionAnnual:
+    description: the fuel renewable technologies produce over the year
+    dims: [REGION, YEAR]
+  RETotalProductionOfTargetFuelAnnual:
+    description: the production of the fuels the renewable target counts, over the year
+    dims: [REGION, YEAR]
+
+  # -------------------------------------------------------------- Emissions
+  AnnualTechnologyEmissionByMode:
+    description: the emission a technology releases in a mode over the year
+    dims: [REGION, TECHNOLOGY, EMISSION, MODE_OF_OPERATION, YEAR]
+    bounds: { lower: 0 }
+  AnnualTechnologyEmission:
+    description: the emission a technology releases over the year
+    dims: [REGION, TECHNOLOGY, EMISSION, YEAR]
+    bounds: { lower: 0 }
+  AnnualTechnologyEmissionPenaltyByEmission:
+    description: the undiscounted penalty on one emission of a technology in the year
+    dims: [REGION, TECHNOLOGY, EMISSION, YEAR]
+    bounds: { lower: 0 }
+  AnnualTechnologyEmissionsPenalty:
+    description: the undiscounted penalty on every emission of a technology in the year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  DiscountedTechnologyEmissionsPenalty:
+    description: the emissions penalty of the year, discounted to the first year from mid-year
+    dims: [REGION, TECHNOLOGY, YEAR]
+    bounds: { lower: 0 }
+  AnnualEmissions:
+    description: the emission the region releases over the year
+    dims: [REGION, EMISSION, YEAR]
+    bounds: { lower: 0 }
+  ModelPeriodEmissions:
+    description: the emission the region releases over the model period, exogenous emission included
+    dims: [REGION, EMISSION]
+    bounds: { lower: 0 }
+
+expressions:
+  DiscountFactor:
+    description: what one unit of cost at the start of the year is worth in the first year
+    dims: [REGION, YEAR]
+    expression: (1 + DiscountRate) ** YearsSinceStart
+  DiscountFactorMid:
+    description: what one unit of cost in the middle of the year is worth in the first year
+    dims: [REGION, YEAR]
+    expression: (1 + DiscountRate) ** (YearsSinceStart + 0.5)
+  CapitalRecoveryFactor:
+    description: >-
+      the share of a technology's capital cost paid each year over its
+      operational life, at its own discount rate DiscountRateIdv
+    dims: [REGION, TECHNOLOGY]
+    expression: (1 - (1 + DiscountRateIdv) ** (-1)) / (1 - (1 + DiscountRateIdv) ** (-OperationalLife))
+  PvAnnuity:
+    description: the present value of an annuity over a technology's operational life
+    dims: [REGION, TECHNOLOGY]
+    expression: (1 - (1 + DiscountRate) ** (-OperationalLife)) * (1 + DiscountRate) / DiscountRate
+  DiscountFactorStorage:
+    description: what one unit of storage cost at the start of the year is worth in the first year
+    dims: [REGION, STORAGE, YEAR]
+    expression: (1 + DiscountRateStorage) ** YearsSinceStart
+  DiscountFactorMidStorage:
+    description: >-
+      what one unit of storage cost in the middle of the year is worth in the
+      first year; declared by OSeMOSYS and read by none of its constraints
+    dims: [REGION, STORAGE, YEAR]
+    expression: (1 + DiscountRateStorage) ** (YearsSinceStart + 0.5)
+
+  # The storage level carried into each chronological boundary. OSeMOSYS writes
+  # each as an `if ... then ... else` inside one constraint; here each is one
+  # named quantity with a case per branch.
+  StorageLevelYearStartCarried:
+    description: the storage level a year starts with — the initial level, or where the previous year ended
+    dims: [REGION, STORAGE, YEAR]
+    cases:
+      first_year:
+        when: "position(YEAR) == 0"
+        expression: StorageLevelStart
+    otherwise: shift(StorageLevelYearStart + every_storage_period(NetChargeWithinYear), along=YEAR, offset=1)
+  StorageLevelYearFinishCarried:
+    description: the storage level a year ends with — where the next year starts, or the last year's own balance
+    dims: [REGION, STORAGE, YEAR]
+    cases:
+      last_year:
+        when: "position(YEAR) == -1"
+        expression: >-
+          StorageLevelYearStart
+          + every_storage_period(NetChargeWithinYear)
+    otherwise: shift(StorageLevelYearStart, along=YEAR, offset=-1)
+  StorageLevelSeasonStartCarried:
+    description: the storage level a season starts with — where the year starts, or where the previous season ended
+    dims: [REGION, STORAGE, SEASON, YEAR]
+    cases:
+      first_season:
+        when: "position(SEASON) == 0"
+        expression: StorageLevelYearStart
+    otherwise: >-
+      shift(StorageLevelSeasonStart
+      + sum(sum(NetChargeWithinYear, over=DAYTYPE), over=DAILYTIMEBRACKET),
+      along=SEASON, offset=1)
+  StorageLevelDayTypeStartCarried:
+    description: the storage level a day type starts with — where the season starts, or where the previous day type ended
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    cases:
+      first_daytype:
+        when: "position(DAYTYPE) == 0"
+        expression: StorageLevelSeasonStart
+    otherwise: >-
+      shift(StorageLevelDayTypeStart
+      + sum(NetChargeWithinDay * DaysInDayType, over=DAILYTIMEBRACKET),
+      along=DAYTYPE, offset=1)
+  StorageLevelDayTypeFinishCarried:
+    description: >-
+      the storage level a day type ends with — where the year ends after the
+      last day type of the last season, where the next season starts after the
+      last day type of any other, and otherwise the next day type's finish less
+      what that day type charges
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    cases:
+      last_daytype_of_last_season:
+        when: "position(SEASON) == -1 AND position(DAYTYPE) == -1"
+        expression: StorageLevelYearFinish
+      last_daytype_of_season:
+        when: "position(SEASON) != -1 AND position(DAYTYPE) == -1"
+        expression: shift(StorageLevelSeasonStart, along=SEASON, offset=-1)
+    otherwise: >-
+      shift(StorageLevelDayTypeFinish
+      - sum(NetChargeWithinDay * DaysInDayType, over=DAILYTIMEBRACKET),
+      along=DAYTYPE, offset=-1)
+
+macros:
+  brackets_before:
+    description: >-
+      the sum over the daily time brackets strictly before this one —
+      MathProg's `sum{lhlh in DAILYTIMEBRACKET: lh-lhlh>0}`
+    args: [x]
+    template: sum_back(x, along=DAILYTIMEBRACKET, window=DailyTimeBracketCount) - x
+  brackets_after:
+    description: >-
+      the sum over the daily time brackets strictly after this one —
+      MathProg's `sum{lhlh in DAILYTIMEBRACKET: lh-lhlh<0}`
+    args: [x]
+    template: sum(x, over=DAILYTIMEBRACKET) - sum_back(x, along=DAILYTIMEBRACKET, window=DailyTimeBracketCount)
+  every_storage_period:
+    description: a sum over every season, day type and daily time bracket
+    args: [x]
+    template: sum(sum(sum(x, over=SEASON), over=DAYTYPE), over=DAILYTIMEBRACKET)
+
+constraints:
+  EQ_SpecifiedDemand:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "SpecifiedAnnualDemand != 0"
+    expression: SpecifiedAnnualDemand * SpecifiedDemandProfile / YearSplit == RateOfDemand
+
+  # --------------------------------------------------- Capacity adequacy A
+  CAa1_TotalNewCapacity:
+    description: >-
+      new capacity stays in service for its operational life — MathProg's
+      `sum{yy in YEAR: y-yy < OperationalLife && y-yy >= 0}`
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: AccumulatedNewCapacity == sum_back(NewCapacity, along=YEAR, window=OperationalLife)
+  CAa2_TotalAnnualCapacity:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: AccumulatedNewCapacity + ResidualCapacity == TotalCapacityAnnual
+  CAa3_TotalActivityOfEachTechnology:
+    dims: [REGION, TECHNOLOGY, TIMESLICE, YEAR]
+    expression: sum(RateOfActivity, over=MODE_OF_OPERATION) == RateOfTotalActivity
+  CAa4_Constraint_Capacity:
+    dims: [REGION, TIMESLICE, TECHNOLOGY, YEAR]
+    expression: RateOfTotalActivity <= TotalCapacityAnnual * CapacityFactor * CapacityToActivityUnit
+  CAa5_TotalNewCapacity:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "CapacityOfOneTechnologyUnit != 0"
+    expression: CapacityOfOneTechnologyUnit * NumberOfNewTechnologyUnits == NewCapacity
+
+  # --------------------------------------------------- Capacity adequacy B
+  CAb1_PlannedMaintenance:
+    description: capacity great enough to meet the annual average activity, after planned maintenance
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "AvailabilityFactor < 1"
+    expression: >-
+      sum(RateOfTotalActivity * YearSplit, over=TIMESLICE)
+      <= sum(TotalCapacityAnnual * CapacityFactor * YearSplit, over=TIMESLICE)
+      * AvailabilityFactor * CapacityToActivityUnit
+
+  # ------------------------------------------------------ Energy balance A
+  EBa1_RateOfFuelProduction1:
+    dims: [REGION, TIMESLICE, FUEL, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+    where: "OutputActivityRatio != 0"
+    expression: RateOfActivity * OutputActivityRatio == RateOfProductionByTechnologyByMode
+  EBa2_RateOfFuelProduction2:
+    dims: [REGION, TIMESLICE, FUEL, TECHNOLOGY, YEAR]
+    expression: sum(RateOfProductionByTechnologyByMode, over=MODE_OF_OPERATION) == RateOfProductionByTechnology
+  EBa3_RateOfFuelProduction3:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "sum(sum(OutputActivityRatio, over=TECHNOLOGY), over=MODE_OF_OPERATION) != 0"
+    expression: sum(RateOfProductionByTechnology, over=TECHNOLOGY) == RateOfProduction
+  EBa4_RateOfFuelUse1:
+    dims: [REGION, TIMESLICE, FUEL, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+    where: "InputActivityRatio != 0"
+    expression: RateOfActivity * InputActivityRatio == RateOfUseByTechnologyByMode
+  EBa5_RateOfFuelUse2:
+    dims: [REGION, TIMESLICE, FUEL, TECHNOLOGY, YEAR]
+    where: "sum(InputActivityRatio, over=MODE_OF_OPERATION) != 0"
+    expression: sum(RateOfUseByTechnologyByMode, over=MODE_OF_OPERATION) == RateOfUseByTechnology
+  EBa6_RateOfFuelUse3:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "sum(sum(InputActivityRatio, over=TECHNOLOGY), over=MODE_OF_OPERATION) != 0"
+    expression: sum(RateOfUseByTechnology, over=TECHNOLOGY) == RateOfUse
+  EBa7_EnergyBalanceEachTS1:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "sum(sum(OutputActivityRatio, over=TECHNOLOGY), over=MODE_OF_OPERATION) != 0"
+    expression: RateOfProduction * YearSplit == Production
+  EBa8_EnergyBalanceEachTS2:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "sum(sum(InputActivityRatio, over=TECHNOLOGY), over=MODE_OF_OPERATION) != 0"
+    expression: RateOfUse * YearSplit == Use
+  EBa9_EnergyBalanceEachTS3:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    where: "SpecifiedAnnualDemand != 0"
+    expression: RateOfDemand * YearSplit == Demand
+  EBa10_EnergyBalanceEachTS4:
+    description: what one region sends another, the other receives — `Trade[r,rr] = -Trade[rr,r]`
+    dims: [REGION, _REGION, TIMESLICE, FUEL, YEAR]
+    where: "TradeRoute != 0"
+    expression: >-
+      Trade == -at(Trade, by=TradeReverse, over=[reverse_region, reverse_partner], into=[REGION, _REGION])
+  EBa11_EnergyBalanceEachTS5:
+    dims: [REGION, TIMESLICE, FUEL, YEAR]
+    expression: Production >= Demand + Use + sum(Trade * TradeRoute, over=_REGION)
+
+  # ------------------------------------------------------ Energy balance B
+  EBb1_EnergyBalanceEachYear1:
+    dims: [REGION, FUEL, YEAR]
+    expression: sum(Production, over=TIMESLICE) == ProductionAnnual
+  EBb2_EnergyBalanceEachYear2:
+    dims: [REGION, FUEL, YEAR]
+    expression: sum(Use, over=TIMESLICE) == UseAnnual
+  EBb3_EnergyBalanceEachYear3:
+    dims: [REGION, _REGION, FUEL, YEAR]
+    expression: sum(Trade, over=TIMESLICE) == TradeAnnual
+  EBb4_EnergyBalanceEachYear4:
+    dims: [REGION, FUEL, YEAR]
+    expression: >-
+      ProductionAnnual
+      >= UseAnnual + sum(TradeAnnual * TradeRoute, over=_REGION) + AccumulatedAnnualDemand
+
+  # --------------------------------- Accounting technology production/use
+  Acc1_FuelProductionByTechnology:
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    expression: RateOfProductionByTechnology * YearSplit == ProductionByTechnology
+  Acc2_FuelUseByTechnology:
+    dims: [REGION, TIMESLICE, TECHNOLOGY, FUEL, YEAR]
+    expression: RateOfUseByTechnology * YearSplit == UseByTechnology
+  Acc3_AverageAnnualRateOfActivity:
+    dims: [REGION, TECHNOLOGY, MODE_OF_OPERATION, YEAR]
+    expression: sum(RateOfActivity * YearSplit, over=TIMESLICE) == TotalAnnualTechnologyActivityByMode
+  Acc4_ModelPeriodCostByRegion:
+    dims: [REGION]
+    expression: sum(TotalDiscountedCost, over=YEAR) == ModelPeriodCostByRegion
+
+  # ------------------------------------------------------ Storage equations
+  S1_RateOfStorageCharge:
+    description: >-
+      MathProg sums only where TechnologyToStorage > 0; a zero share adds
+      nothing, and the assumptions hold the shares non-negative
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: >-
+      sum(sum(sum(RateOfActivity * TechnologyToStorage * Conversionls * Conversionld * Conversionlh,
+      over=TECHNOLOGY), over=MODE_OF_OPERATION), over=TIMESLICE)
+      == RateOfStorageCharge
+  S2_RateOfStorageDischarge:
+    description: >-
+      MathProg sums only where TechnologyFromStorage > 0; a zero share adds
+      nothing, and the assumptions hold the shares non-negative
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: >-
+      sum(sum(sum(RateOfActivity * TechnologyFromStorage * Conversionls * Conversionld * Conversionlh,
+      over=TECHNOLOGY), over=MODE_OF_OPERATION), over=TIMESLICE)
+      == RateOfStorageDischarge
+  S3_NetChargeWithinYear:
+    description: >-
+      MathProg sums only the time slices every conversion maps to the bracket;
+      any other slice carries a zero conversion and adds nothing
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: >-
+      sum((RateOfStorageCharge - RateOfStorageDischarge) * YearSplit
+      * Conversionls * Conversionld * Conversionlh, over=TIMESLICE)
+      == NetChargeWithinYear
+  S4_NetChargeWithinDay:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: (RateOfStorageCharge - RateOfStorageDischarge) * DaySplit == NetChargeWithinDay
+  S5_and_S6_StorageLevelYearStart:
+    dims: [REGION, STORAGE, YEAR]
+    expression: StorageLevelYearStartCarried == StorageLevelYearStart
+  S7_and_S8_StorageLevelYearFinish:
+    dims: [REGION, STORAGE, YEAR]
+    expression: StorageLevelYearFinishCarried == StorageLevelYearFinish
+  S9_and_S10_StorageLevelSeasonStart:
+    dims: [REGION, STORAGE, SEASON, YEAR]
+    expression: StorageLevelSeasonStartCarried == StorageLevelSeasonStart
+  S11_and_S12_StorageLevelDayTypeStart:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    expression: StorageLevelDayTypeStartCarried == StorageLevelDayTypeStart
+  S13_and_S14_and_S15_StorageLevelDayTypeFinish:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, YEAR]
+    expression: StorageLevelDayTypeFinishCarried == StorageLevelDayTypeFinish
+
+  # ---------------------------------------------------- Storage constraints
+  SC1_LowerLimit_BeginningOfDailyTimeBracketOfFirstInstanceOfDayTypeInFirstWeekConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: 0 <= StorageLevelDayTypeStart + brackets_before(NetChargeWithinDay) - StorageLowerLimit
+  SC1_UpperLimit_BeginningOfDailyTimeBracketOfFirstInstanceOfDayTypeInFirstWeekConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: StorageLevelDayTypeStart + brackets_before(NetChargeWithinDay) - StorageUpperLimit <= 0
+  SC2_LowerLimit_EndOfDailyTimeBracketOfLastInstanceOfDayTypeInFirstWeekConstraint:
+    description: MathProg's `if ld > min(DAYTYPE) then ...` leaves `0 <= 0` at the first day type, so no row stands there
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    where: "position(DAYTYPE) > 0"
+    expression: >-
+      0 <= StorageLevelDayTypeStart
+      - shift(brackets_after(NetChargeWithinDay), along=DAYTYPE, offset=1)
+      - StorageLowerLimit
+  SC2_UpperLimit_EndOfDailyTimeBracketOfLastInstanceOfDayTypeInFirstWeekConstraint:
+    description: MathProg's `if ld > min(DAYTYPE) then ...` leaves `0 <= 0` at the first day type, so no row stands there
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    where: "position(DAYTYPE) > 0"
+    expression: >-
+      StorageLevelDayTypeStart
+      - shift(brackets_after(NetChargeWithinDay), along=DAYTYPE, offset=1)
+      - StorageUpperLimit <= 0
+  SC3_LowerLimit_EndOfDailyTimeBracketOfLastInstanceOfDayTypeInLastWeekConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: 0 <= StorageLevelDayTypeFinish - brackets_after(NetChargeWithinDay) - StorageLowerLimit
+  SC3_UpperLimit_EndOfDailyTimeBracketOfLastInstanceOfDayTypeInLastWeekConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: StorageLevelDayTypeFinish - brackets_after(NetChargeWithinDay) - StorageUpperLimit <= 0
+  SC4_LowerLimit_BeginningOfDailyTimeBracketOfFirstInstanceOfDayTypeInLastWeekConstraint:
+    description: MathProg's `if ld > min(DAYTYPE) then ...` leaves `0 <= 0` at the first day type, so no row stands there
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    where: "position(DAYTYPE) > 0"
+    expression: >-
+      0 <= shift(StorageLevelDayTypeFinish, along=DAYTYPE, offset=1)
+      + brackets_before(NetChargeWithinDay)
+      - StorageLowerLimit
+  SC4_UpperLimit_BeginningOfDailyTimeBracketOfFirstInstanceOfDayTypeInLastWeekConstraint:
+    description: MathProg's `if ld > min(DAYTYPE) then ...` leaves `0 <= 0` at the first day type, so no row stands there
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    where: "position(DAYTYPE) > 0"
+    expression: >-
+      shift(StorageLevelDayTypeFinish, along=DAYTYPE, offset=1)
+      + brackets_before(NetChargeWithinDay)
+      - StorageUpperLimit <= 0
+  SC5_MaxChargeConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: RateOfStorageCharge <= StorageMaxChargeRate
+  SC6_MaxDischargeConstraint:
+    dims: [REGION, STORAGE, SEASON, DAYTYPE, DAILYTIMEBRACKET, YEAR]
+    expression: RateOfStorageDischarge <= StorageMaxDischargeRate
+
+  # ---------------------------------------------------- Storage investments
+  SI1_StorageUpperLimit:
+    dims: [REGION, STORAGE, YEAR]
+    expression: AccumulatedNewStorageCapacity + ResidualStorageCapacity == StorageUpperLimit
+  SI2_StorageLowerLimit:
+    dims: [REGION, STORAGE, YEAR]
+    expression: MinStorageCharge * StorageUpperLimit == StorageLowerLimit
+  SI3_TotalNewStorage:
+    description: new storage capacity stays in service for its operational life
+    dims: [REGION, STORAGE, YEAR]
+    expression: sum_back(NewStorageCapacity, along=YEAR, window=OperationalLifeStorage) == AccumulatedNewStorageCapacity
+  SI4_UndiscountedCapitalInvestmentStorage:
+    dims: [REGION, STORAGE, YEAR]
+    expression: CapitalCostStorage * NewStorageCapacity == CapitalInvestmentStorage
+  SI5_DiscountingCapitalInvestmentStorage:
+    dims: [REGION, STORAGE, YEAR]
+    expression: CapitalInvestmentStorage / DiscountFactorStorage == DiscountedCapitalInvestmentStorage
+  SI6_SalvageValueStorageAtEndOfPeriod1:
+    description: storage that reaches the end of its life within the model period is worth nothing at its end
+    dims: [REGION, STORAGE, YEAR]
+    where: "OperationalLifeStorage <= YearsUntilEnd"
+    expression: 0 == SalvageValueStorage
+  SI7_SalvageValueStorageAtEndOfPeriod2:
+    description: straight-line depreciation, or sinking-fund depreciation at a zero discount rate
+    dims: [REGION, STORAGE, YEAR]
+    where: >-
+      (DepreciationMethod == 1 AND OperationalLifeStorage > YearsUntilEnd AND DiscountRateStorage == 0)
+      OR (DepreciationMethod == 2 AND OperationalLifeStorage > YearsUntilEnd)
+    expression: CapitalInvestmentStorage * (1 - YearsUntilEnd / OperationalLifeStorage) == SalvageValueStorage
+  SI8_SalvageValueStorageAtEndOfPeriod3:
+    description: sinking-fund depreciation at a positive discount rate
+    dims: [REGION, STORAGE, YEAR]
+    where: "DepreciationMethod == 1 AND OperationalLifeStorage > YearsUntilEnd AND DiscountRateStorage > 0"
+    expression: >-
+      CapitalInvestmentStorage * (1 - ((1 + DiscountRateStorage) ** YearsUntilEnd - 1)
+      / ((1 + DiscountRateStorage) ** OperationalLifeStorage - 1))
+      == SalvageValueStorage
+  SI9_SalvageValueStorageDiscountedToStartYear:
+    dims: [REGION, STORAGE, YEAR]
+    description: >-
+      the salvage value discounted over the whole model period;
+      `YearsSinceStart + YearsUntilEnd` is `max(YEAR) - min(YEAR) + 1`
+    expression: >-
+      SalvageValueStorage / (1 + DiscountRateStorage) ** (YearsSinceStart + YearsUntilEnd)
+      == DiscountedSalvageValueStorage
+  SI10_TotalDiscountedCostByStorage:
+    dims: [REGION, STORAGE, YEAR]
+    expression: DiscountedCapitalInvestmentStorage - DiscountedSalvageValueStorage == TotalDiscountedStorageCost
+
+  # ---------------------------------------------------------- Capital costs
+  CC1_UndiscountedCapitalInvestment:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: CapitalCost * NewCapacity * CapitalRecoveryFactor * PvAnnuity == CapitalInvestment
+  CC2_DiscountingCapitalInvestment:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: CapitalInvestment / DiscountFactor == DiscountedCapitalInvestment
+
+  # ---------------------------------------------------------- Salvage value
+  SV1_SalvageValueAtEndOfPeriod1:
+    description: sinking-fund depreciation at a positive discount rate
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "DepreciationMethod == 1 AND OperationalLife > YearsUntilEnd AND DiscountRate > 0"
+    expression: >-
+      SalvageValue == CapitalCost * NewCapacity * CapitalRecoveryFactor * PvAnnuity
+      * (1 - ((1 + DiscountRate) ** YearsUntilEnd - 1) / ((1 + DiscountRate) ** OperationalLife - 1))
+  SV2_SalvageValueAtEndOfPeriod2:
+    description: straight-line depreciation, or sinking-fund depreciation at a zero discount rate
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: >-
+      (DepreciationMethod == 1 AND OperationalLife > YearsUntilEnd AND DiscountRate == 0)
+      OR (DepreciationMethod == 2 AND OperationalLife > YearsUntilEnd)
+    expression: >-
+      SalvageValue == CapitalCost * NewCapacity * CapitalRecoveryFactor * PvAnnuity
+      * (1 - YearsUntilEnd / OperationalLife)
+  SV3_SalvageValueAtEndOfPeriod3:
+    description: capacity that reaches the end of its life within the model period is worth nothing at its end
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "OperationalLife <= YearsUntilEnd"
+    expression: SalvageValue == 0
+  SV4_SalvageValueDiscountedToStartYear:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    description: >-
+      the salvage value discounted over the whole model period;
+      `YearsSinceStart + YearsUntilEnd` is `max(YEAR) - min(YEAR) + 1`
+    expression: DiscountedSalvageValue == SalvageValue / (1 + DiscountRate) ** (YearsSinceStart + YearsUntilEnd)
+
+  # -------------------------------------------------------- Operating costs
+  OC1_OperatingCostsVariable:
+    description: >-
+      MathProg indexes this over TIMESLICE too, and no term reads it, so each
+      row there is the same row repeated; it is stated once
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "sum(VariableCost, over=MODE_OF_OPERATION) != 0"
+    expression: >-
+      sum(TotalAnnualTechnologyActivityByMode * VariableCost, over=MODE_OF_OPERATION)
+      == AnnualVariableOperatingCost
+  OC2_OperatingCostsFixedAnnual:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: TotalCapacityAnnual * FixedCost == AnnualFixedOperatingCost
+  OC3_OperatingCostsTotalAnnual:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: AnnualFixedOperatingCost + AnnualVariableOperatingCost == OperatingCost
+  OC4_DiscountedOperatingCostsTotalAnnual:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: OperatingCost / DiscountFactorMid == DiscountedOperatingCost
+
+  # ------------------------------------------------- Total discounted costs
+  TDC1_TotalDiscountedCostByTechnology:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: >-
+      DiscountedOperatingCost + DiscountedCapitalInvestment
+      + DiscountedTechnologyEmissionsPenalty - DiscountedSalvageValue
+      == TotalDiscountedCostByTechnology
+  TDC2_TotalDiscountedCost:
+    dims: [REGION, YEAR]
+    expression: >-
+      sum(TotalDiscountedCostByTechnology, over=TECHNOLOGY)
+      + sum(TotalDiscountedStorageCost, over=STORAGE)
+      == TotalDiscountedCost
+
+  # ---------------------------------------------- Total capacity constraints
+  TCC1_TotalAnnualMaxCapacityConstraint:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalAnnualMaxCapacity != -1"
+    expression: TotalCapacityAnnual <= TotalAnnualMaxCapacity
+  TCC2_TotalAnnualMinCapacityConstraint:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalAnnualMinCapacity > 0"
+    expression: TotalCapacityAnnual >= TotalAnnualMinCapacity
+
+  # ------------------------------------------------ New capacity constraints
+  NCC1_TotalAnnualMaxNewCapacityConstraint:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalAnnualMaxCapacityInvestment != -1"
+    expression: NewCapacity <= TotalAnnualMaxCapacityInvestment
+  NCC2_TotalAnnualMinNewCapacityConstraint:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalAnnualMinCapacityInvestment > 0"
+    expression: NewCapacity >= TotalAnnualMinCapacityInvestment
+
+  # --------------------------------------------- Annual activity constraints
+  AAC1_TotalAnnualTechnologyActivity:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: sum(RateOfTotalActivity * YearSplit, over=TIMESLICE) == TotalTechnologyAnnualActivity
+  AAC2_TotalAnnualTechnologyActivityUpperLimit:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalTechnologyAnnualActivityUpperLimit != -1"
+    expression: TotalTechnologyAnnualActivity <= TotalTechnologyAnnualActivityUpperLimit
+  AAC3_TotalAnnualTechnologyActivityLowerLimit:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    where: "TotalTechnologyAnnualActivityLowerLimit > 0"
+    expression: TotalTechnologyAnnualActivity >= TotalTechnologyAnnualActivityLowerLimit
+
+  # ---------------------------------------------- Total activity constraints
+  TAC1_TotalModelHorizonTechnologyActivity:
+    dims: [REGION, TECHNOLOGY]
+    expression: sum(TotalTechnologyAnnualActivity, over=YEAR) == TotalTechnologyModelPeriodActivity
+  TAC2_TotalModelHorizonTechnologyActivityUpperLimit:
+    dims: [REGION, TECHNOLOGY]
+    where: "TotalTechnologyModelPeriodActivityUpperLimit != -1"
+    expression: TotalTechnologyModelPeriodActivity <= TotalTechnologyModelPeriodActivityUpperLimit
+  TAC3_TotalModelHorizenTechnologyActivityLowerLimit:
+    dims: [REGION, TECHNOLOGY]
+    where: "TotalTechnologyModelPeriodActivityLowerLimit > 0"
+    expression: TotalTechnologyModelPeriodActivity >= TotalTechnologyModelPeriodActivityLowerLimit
+
+  # ------------------------------------------------ Reserve margin constraint
+  RM1_ReserveMargin_TechnologiesIncluded_In_Activity_Units:
+    description: >-
+      MathProg indexes this over TIMESLICE too, and no term reads it, so each
+      row there is the same row repeated; it is stated once
+    dims: [REGION, YEAR]
+    where: "ReserveMargin > 0"
+    expression: >-
+      sum(TotalCapacityAnnual * ReserveMarginTagTechnology * CapacityToActivityUnit, over=TECHNOLOGY)
+      == TotalCapacityInReserveMargin
+  RM2_ReserveMargin_FuelsIncluded:
+    dims: [REGION, TIMESLICE, YEAR]
+    where: "ReserveMargin > 0"
+    expression: sum(RateOfProduction * ReserveMarginTagFuel, over=FUEL) == DemandNeedingReserveMargin
+  RM3_ReserveMargin_Constraint:
+    dims: [REGION, TIMESLICE, YEAR]
+    where: "ReserveMargin > 0"
+    expression: DemandNeedingReserveMargin * ReserveMargin <= TotalCapacityInReserveMargin
+
+  # --------------------------------------------------- RE production target
+  RE1_FuelProductionByTechnologyAnnual:
+    dims: [REGION, TECHNOLOGY, FUEL, YEAR]
+    expression: sum(ProductionByTechnology, over=TIMESLICE) == ProductionByTechnologyAnnual
+  RE2_TechIncluded:
+    dims: [REGION, YEAR]
+    expression: >-
+      sum(sum(ProductionByTechnologyAnnual * RETagTechnology, over=TECHNOLOGY), over=FUEL)
+      == TotalREProductionAnnual
+  RE3_FuelIncluded:
+    dims: [REGION, YEAR]
+    expression: >-
+      sum(sum(RateOfProduction * YearSplit * RETagFuel, over=TIMESLICE), over=FUEL)
+      == RETotalProductionOfTargetFuelAnnual
+  RE4_EnergyConstraint:
+    dims: [REGION, YEAR]
+    expression: REMinProductionTarget * RETotalProductionOfTargetFuelAnnual <= TotalREProductionAnnual
+  RE5_FuelUseByTechnologyAnnual:
+    dims: [REGION, TECHNOLOGY, FUEL, YEAR]
+    expression: sum(RateOfUseByTechnology * YearSplit, over=TIMESLICE) == UseByTechnologyAnnual
+
+  # ---------------------------------------------------- Emissions accounting
+  E1_AnnualEmissionProductionByMode:
+    dims: [REGION, TECHNOLOGY, EMISSION, MODE_OF_OPERATION, YEAR]
+    where: "EmissionActivityRatio != 0"
+    expression: EmissionActivityRatio * TotalAnnualTechnologyActivityByMode == AnnualTechnologyEmissionByMode
+  E2_AnnualEmissionProduction:
+    dims: [REGION, TECHNOLOGY, EMISSION, YEAR]
+    expression: sum(AnnualTechnologyEmissionByMode, over=MODE_OF_OPERATION) == AnnualTechnologyEmission
+  E3_EmissionsPenaltyByTechAndEmission:
+    dims: [REGION, TECHNOLOGY, EMISSION, YEAR]
+    where: "EmissionsPenalty != 0"
+    expression: AnnualTechnologyEmission * EmissionsPenalty == AnnualTechnologyEmissionPenaltyByEmission
+  E4_EmissionsPenaltyByTechnology:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: sum(AnnualTechnologyEmissionPenaltyByEmission, over=EMISSION) == AnnualTechnologyEmissionsPenalty
+  E5_DiscountedEmissionsPenaltyByTechnology:
+    dims: [REGION, TECHNOLOGY, YEAR]
+    expression: AnnualTechnologyEmissionsPenalty / DiscountFactorMid == DiscountedTechnologyEmissionsPenalty
+  E6_EmissionsAccounting1:
+    dims: [REGION, EMISSION, YEAR]
+    expression: sum(AnnualTechnologyEmission, over=TECHNOLOGY) == AnnualEmissions
+  E7_EmissionsAccounting2:
+    dims: [REGION, EMISSION]
+    expression: sum(AnnualEmissions, over=YEAR) == ModelPeriodEmissions - ModelPeriodExogenousEmission
+  E8_AnnualEmissionsLimit:
+    dims: [REGION, EMISSION, YEAR]
+    where: "AnnualEmissionLimit != -1"
+    expression: AnnualEmissions + AnnualExogenousEmission <= AnnualEmissionLimit
+  E9_ModelPeriodEmissionsLimit:
+    dims: [REGION, EMISSION]
+    where: "ModelPeriodEmissionLimit != -1"
+    expression: ModelPeriodEmissions <= ModelPeriodEmissionLimit
+
+objective:
+  description: the discounted cost of the whole system over the model period
+  sense: minimize
+  expression: sum(TotalDiscountedCost)
+
+assumptions:
+  # The MathProg file's `check` statements.
+  capacity_investment_bounds_do_not_cross:
+    description: "'Capacity investment' check"
+    holds: "TotalAnnualMaxCapacityInvestment >= TotalAnnualMinCapacityInvestment"
+    where: "TotalAnnualMaxCapacityInvestment != -1 AND TotalAnnualMinCapacityInvestment != 0"
+  annual_activity_limits_do_not_cross:
+    description: "'Annual Activity' check"
+    holds: "TotalTechnologyAnnualActivityUpperLimit >= TotalTechnologyAnnualActivityLowerLimit"
+    where: >-
+      TotalTechnologyAnnualActivityUpperLimit != -1
+      AND TotalTechnologyAnnualActivityUpperLimit != 0
+      AND TotalTechnologyAnnualActivityLowerLimit != 0
+  residual_capacity_within_max_capacity:
+    description: "'Capacity' check 1"
+    holds: "TotalAnnualMaxCapacity >= ResidualCapacity"
+    where: "TotalAnnualMaxCapacity != -1 AND ResidualCapacity != 0"
+  residual_and_min_investment_within_max_capacity:
+    description: "'Capacity' check 2"
+    holds: "TotalAnnualMaxCapacity >= ResidualCapacity + TotalAnnualMinCapacityInvestment"
+    where: "TotalAnnualMaxCapacity != -1 AND ResidualCapacity != 0"
+  max_capacity_can_meet_min_activity:
+    description: "'Minimum Annual activity' check"
+    holds: >-
+      sum(CapacityFactor * YearSplit, over=TIMESLICE) * TotalAnnualMaxCapacity
+      * AvailabilityFactor * CapacityToActivityUnit
+      >= TotalTechnologyAnnualActivityLowerLimit
+    where: >-
+      TotalAnnualMaxCapacity != 0 AND TotalAnnualMaxCapacity != -1
+      AND TotalTechnologyAnnualActivityLowerLimit != 0
+      AND AvailabilityFactor != 0 AND CapacityToActivityUnit != 0
+  year_split_sums_to_one:
+    description: "'Time Slice' check"
+    holds: "sum(YearSplit, over=TIMESLICE) >= 0.9999 AND sum(YearSplit, over=TIMESLICE) <= 1.0001"
+  model_period_activity_limit_covers_annual_limits:
+    description: "'Model period activity limit' check"
+    holds: >-
+      TotalTechnologyModelPeriodActivityLowerLimit
+      >= sum(TotalTechnologyAnnualActivityLowerLimit, over=YEAR)
+    where: "TotalTechnologyModelPeriodActivityLowerLimit != 0"
+
+  # What this translation reads into the data.
+  years_since_start_counts_from_the_first_year:
+    description: YearsSinceStart is y - min(YEAR), zero in the first year
+    holds: "YearsSinceStart == 0"
+    where: "position(YEAR) == 0"
+  years_until_end_counts_to_the_last_year:
+    description: YearsUntilEnd is max(YEAR) - y + 1, one in the last year
+    holds: "YearsUntilEnd == 1"
+    where: "position(YEAR) == -1"
+  operational_life_is_not_negative:
+    description: >-
+      a window of new capacity in service spans OperationalLife years; a life
+      of 0 is an empty window, as in MathProg, where no capacity accumulates
+    holds: "OperationalLife >= 0"
+  operational_life_storage_is_not_negative:
+    description: >-
+      a window of new storage capacity in service spans OperationalLifeStorage
+      years; a life of 0 is an empty window, as in MathProg, where no capacity
+      accumulates
+    holds: "OperationalLifeStorage >= 0"
+  storage_shares_are_non_negative:
+    description: S1 and S2 sum every share, where MathProg sums only the positive ones
+    holds: "TechnologyToStorage >= 0 AND TechnologyFromStorage >= 0"
+  conversion_ls_is_binary:
+    holds: "Conversionls == 0 OR Conversionls == 1"
+  conversion_ld_is_binary:
+    holds: "Conversionld == 0 OR Conversionld == 1"
+  conversion_lh_is_binary:
+    holds: "Conversionlh == 0 OR Conversionlh == 1"
+  trade_route_is_binary:
+    holds: "TradeRoute == 0 OR TradeRoute == 1"
+  reserve_margin_tag_technology_is_a_share:
+    holds: "ReserveMarginTagTechnology >= 0 AND ReserveMarginTagTechnology <= 1"
+  reserve_margin_tag_fuel_is_binary:
+    holds: "ReserveMarginTagFuel == 0 OR ReserveMarginTagFuel == 1"
+  re_tag_technology_is_binary:
+    holds: "RETagTechnology == 0 OR RETagTechnology == 1"
+  re_tag_fuel_is_binary:
+    holds: "RETagFuel == 0 OR RETagFuel == 1"
