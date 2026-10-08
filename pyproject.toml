@@ -23,8 +23,11 @@ packages = ["src/osemosys_mathspec"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-n auto"
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-bdd>=9.0.0",
+    "pytest-xdist>=3.8.0",
 ]
