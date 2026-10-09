@@ -8,7 +8,8 @@ OSeMOSYS (an energy system optimisation model) whose formulation lives in [maths
 
 ```bash
 uv sync                                    # install, incl. the pytest dev group
-uv run pytest                              # whole suite (~15 s, needs HiGHS via highspy)
+uv run pytest                              # whole suite on every core (-n auto; ~50 s on 16 cores, needs HiGHS via highspy)
+uv run pytest -n0 tests/test_behaviour.py -k salvage   # Gherkin scenarios by name, in one process
 uv run pytest tests/test_engine.py::test_a_bare_shift_drops_the_row_at_the_vacated_edge
 uv run pytest tests/test_end_to_end.py -k utopia   # one dataset end to end
 uv run osemosys run csv tests/fixtures/simplicity/data tests/fixtures/simplicity/config.yaml \
@@ -66,6 +67,7 @@ otoole.write ◀─ otoole ResultsPackage ◀─ bridge/results.py ◀───�
 - `test_engine.py` checks each operator on tiny hand-written specs that are passed as dicts to `mathspec.to_spec`.
 - `test_bridge.py` checks defaults, aliases and data prep against minimal otoole-shaped inputs.
 - `test_end_to_end.py` solves SIMPLICITY and UTOPIA end to end. It asserts each dataset's GLPK objective from `GLPK_OBJECTIVE` (relative tolerance 1e-6) and that `advice(load_spec())` is empty. Per fragment, it asserts that advice holds only `given` notes. It also asserts that the merge without each optional block (trade, storage, limits, reserve margin, RE target, emissions) leaves nothing under `given` and that the bridge reads SIMPLICITY's data for it, and that `osemosys.md` equals `mathspec.to_markdown(load_spec())`. Any spec or engine change must keep these objectives. Run one dataset with `-k utopia` or `-k simplicity`.
+- `test_behaviour.py` runs the Gherkin features in `tests/features/` (pytest-bdd), one per OSeMOSYS block. A scenario names its sets and parameter rows over the spec's dims; `*` is every label of the set, a later row overrides an earlier one, and a row left out takes its default from the SIMPLICITY config. Sets a scenario does not name hold one label each, since the engine cannot build over an empty set. Expected values are worked out by hand from `osemosys.txt`, and each objective was matched by GLPK on `osemosys.txt` when the scenario was written. Add a step only where the existing ones cannot state a behaviour, and keep scenario names unique across files, since they become test names. Each scenario builds a full model (~4 s).
 - Each dataset fixture has `config.yaml` (otoole config), `data/` (otoole CSVs) and a note with the `glpsol` command that produced its reference (`ATTRIBUTION.md` or `REFERENCE.md`). A new dataset needs that layout and an entry in `GLPK_OBJECTIVE`.
 
 ## Outside the package

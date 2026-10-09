@@ -102,3 +102,24 @@ fragments (each loads alone, the merge has no advice and renders as `osemosys.md
 the merge without each optional block resolves and reads SIMPLICITY's data), and SIMPLICITY and UTOPIA end to end against GLPK's objective
 (relative tolerance 1e-6). The SIMPLICITY data is CC-BY-4.0. See `tests/fixtures/simplicity/ATTRIBUTION.md`.
 The UTOPIA reference is in `tests/fixtures/utopia/REFERENCE.md`.
+
+`tests/features/` states OSeMOSYS behaviour in Gherkin, one feature per block: demand
+is met at least cost, capacity covers the peak, salvage value is credited, a limit
+binds, storage shifts energy into the night. Each scenario is a model small enough to
+work out by hand, and its expected values were worked out from `osemosys.txt` and
+matched by GLPK on it. `tests/test_behaviour.py` holds the steps:
+
+```gherkin
+Scenario: Residual capacity is used before new capacity is built
+  Given ResidualCapacity is
+    | REGION | TECHNOLOGY | YEAR | VALUE |
+    | R1     | PLANT      | *    | 60    |
+  When the model is solved
+  Then NewCapacity is
+    | REGION | TECHNOLOGY | YEAR | VALUE |
+    | R1     | PLANT      | 2020 | 100   |
+```
+
+A table's columns are the parameter's or variable's dims, `*` is every label of that
+set, and a row the scenario leaves out takes its otoole default. The suite runs on
+every core (`-n auto`, pytest-xdist); pass `-n0` to run in one process.
